@@ -4,7 +4,6 @@
 
 #include <WiFiManager.h>
 #include "AdafruitIO_WiFi.h"
-#include <ArduinoJson.h>
 
 char IO_USERNAME[64] = "put_IO_username_her";
 char IO_KEY[64] = "put_IO_key_here";
