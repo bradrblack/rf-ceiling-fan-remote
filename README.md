@@ -1,1 +1,3 @@
 # rf-ceiling-fan-remote
+
+I was looking for a way to remote control my combo ceiling fan and light using voice control.  The simple solution I came up with was to use a relay module with an ESP32.  The relay module effetively presses buttons on the fan remote by closing the contacts.  The ESP32 registers with an Adafruit IO account for cloud integration where a feed called "fan" is listening for input to send to the device.  You can create iOS Shortcuts which can be called via Siri: "Siri Fan On" or use Google Home Voice control via IFTTT.com integration - a Google Assistant "service" listens for commands and then an Adafruit IO sends commands to the feed.
