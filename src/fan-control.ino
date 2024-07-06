@@ -5,7 +5,7 @@
 #include <WiFiManager.h>
 #include "AdafruitIO_WiFi.h"
 
-char IO_USERNAME[64] = "put_IO_username_her";
+char IO_USERNAME[64] = "put_IO_username_here";
 char IO_KEY[64] = "put_IO_key_here";
 
 static uint8_t objStorage[sizeof(AdafruitIO_WiFi)]; // RAM for the object
