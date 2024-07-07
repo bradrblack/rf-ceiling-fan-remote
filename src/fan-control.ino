@@ -13,6 +13,8 @@ AdafruitIO_WiFi *io;                                // a pointer to the object, 
 
 WiFiManager wifiManager;
 
+// below are the GPIO pin definitions - connect these pins to the relay input for each button to control
+
 #define FAN_LOW 5
 #define FAN_MED 6
 #define FAN_HI 7
@@ -60,6 +62,8 @@ void setup()
   pinMode(FAN_HI,OUTPUT);
   pinMode(FAN_OFF,OUTPUT);
   pinMode(LIGHT_TOGGLE,OUTPUT);
+
+// Relay module is "active low" so set each output to HIGH to avoid closing relays on start
 
   digitalWrite(FAN_LOW, HIGH);
   digitalWrite(FAN_MED, HIGH);
