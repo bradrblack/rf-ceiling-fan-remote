@@ -12,8 +12,6 @@ static uint8_t objStorage[sizeof(AdafruitIO_WiFi)]; // RAM for the object
 AdafruitIO_WiFi *io;                                // a pointer to the object, once it's constructed
 
 WiFiManager wifiManager;
-WiFiManagerParameter custom_IO_USERNAME("iouser", "Adafruit IO Username", IO_USERNAME, 60);
-WiFiManagerParameter custom_IO_KEY("iokey", "Adafruit IO Key", IO_KEY, 60);
 
 #define FAN_LOW 5
 #define FAN_MED 6
