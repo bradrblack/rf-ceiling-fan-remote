@@ -1,3 +1,6 @@
+
+![ESP32 and CC1101 Module](./IMG_4127.jpg)
+
 # rf-ceiling-fan-remote
 
 Voice control for a NOMA combo ceiling fan + light, driven by directly cloning the RF remote's signal instead of physically pressing its buttons.
