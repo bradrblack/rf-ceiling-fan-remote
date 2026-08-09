@@ -1,5 +1,5 @@
 
-![ESP32 and CC1101 Module](./image.jpg)
+![ESP32 and CC1101 Module](./image.jpg){height=200px}
 
 # rf-ceiling-fan-remote
 
