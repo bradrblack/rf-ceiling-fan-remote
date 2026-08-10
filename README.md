@@ -1,5 +1,4 @@
-
-![ESP32 and CC1101 Module](./IMG_4127.jpg)
+<img src="./image.jpg" alt="ESP32 and CC1101" height="200">
 
 # rf-ceiling-fan-remote
 
