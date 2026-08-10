@@ -74,3 +74,13 @@ If you're cloning this for a different remote, re-run `sniff.ino` and update the
 ## Known limitation
 
 The remote only has a single **light toggle** button, not separate on/off codes. The firmware tracks an assumed light state locally and only fires the toggle when a voice command's requested state differs from that tracked state. If the light is ever toggled some other way (the original remote, a wall switch), the tracked state can drift out of sync with reality — there's no feedback path from the fan to detect this.
+
+## Reliability
+
+The production firmware (`fan_control.cpp`) includes a few self-healing measures for a device meant to run unattended indefinitely:
+
+- **Bounded WiFi connect at boot** — if WiFi doesn't connect within 30s, it reboots and retries, instead of hanging forever.
+- **WiFi watchdog** — if WiFi drops and stays disconnected for 60s during normal operation, it reboots.
+- **Daily scheduled reboot** — once a day at 3am (`REBOOT_HOUR`, US Eastern via the `TZ_STRING` POSIX timezone string, DST-aware), it reboots proactively to guard against slow heap fragmentation from the long-running SinricPro WebSocket/TLS connection. Time is synced via NTP at boot.
+
+If you're deploying this outside US Eastern, update `TZ_STRING` in `fan_control.cpp` to your own [POSIX TZ string](https://developer.ibm.com/articles/au-aix-posix/).

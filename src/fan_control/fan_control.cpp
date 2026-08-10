@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <time.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
 #include "SinricPro.h"
@@ -28,6 +29,25 @@
 #define RF_CODE_FAN_HIGH   3964
 #define RF_CODE_FAN_OFF    4028
 #define RF_CODE_LIGHT      3068
+
+// ==========================================
+// Reliability: WiFi watchdog + daily reboot
+// ==========================================
+// If WiFi can't (re)connect within this long, or stays disconnected this
+// long during normal operation, reboot rather than sit there dead.
+const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000;
+const unsigned long WIFI_DOWN_REBOOT_MS     = 60000;
+unsigned long wifiDownSince = 0;
+
+// Scheduled reboot once a day, at a fixed local hour, to guard against slow
+// heap fragmentation from a long-running WebSocket/TLS/JSON connection.
+// POSIX TZ string (not a fixed UTC offset) so DST transitions are handled
+// automatically -- US Eastern: EST=UTC-5, switches to EDT=UTC-4 on the
+// 2nd Sunday of March and back on the 1st Sunday of November.
+#define TZ_STRING        "EST5EDT,M3.2.0,M11.1.0/2"
+#define REBOOT_HOUR      3
+const char* NTP_SERVER = "pool.ntp.org";
+int lastRebootDay = -1;
 
 RCSwitch myRadio = RCSwitch();
 
@@ -129,11 +149,73 @@ void setupWiFi() {
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
+  unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED) {
     Serial.printf(".");
     delay(250);
+    if (millis() - start > WIFI_CONNECT_TIMEOUT_MS) {
+      Serial.println("\r\n[WiFi]: Could not connect in time, rebooting...");
+      delay(100);
+      ESP.restart();
+    }
   }
   Serial.printf("connected!\r\n[WiFi]: IP-Address is %s\r\n", WiFi.localIP().toString().c_str());
+}
+
+void setupTime() {
+  configTzTime(TZ_STRING, NTP_SERVER);
+
+  Serial.print("[NTP]: Syncing time");
+  time_t now = time(nullptr);
+  unsigned long start = millis();
+  while (now < 100000 && millis() - start < 10000) {
+    Serial.print(".");
+    delay(250);
+    now = time(nullptr);
+  }
+
+  if (now < 100000) {
+    Serial.println(" failed to sync (will keep retrying in the background)");
+    return;
+  }
+
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo);
+  char buf[32];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", &timeinfo);
+  Serial.printf(" synced: %s\r\n", buf);
+}
+
+// Reboots if WiFi has been disconnected for too long. WiFi.setAutoReconnect
+// handles brief drops on its own; this is the backstop for when it doesn't.
+void checkWiFiWatchdog() {
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiDownSince == 0) {
+      wifiDownSince = millis();
+    } else if (millis() - wifiDownSince > WIFI_DOWN_REBOOT_MS) {
+      Serial.println("WiFi down too long, rebooting...");
+      delay(100);
+      ESP.restart();
+    }
+  } else {
+    wifiDownSince = 0;
+  }
+}
+
+// Reboots once per day at REBOOT_HOUR local time (see TZ_STRING above).
+void checkDailyReboot() {
+  time_t now = time(nullptr);
+  if (now < 100000) return; // NTP hasn't synced yet
+
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo);
+
+  if (timeinfo.tm_hour == REBOOT_HOUR && timeinfo.tm_mday != lastRebootDay) {
+    lastRebootDay = timeinfo.tm_mday;
+    Serial.println("Scheduled daily reboot...");
+    delay(100);
+    ESP.restart();
+  }
 }
 
 void setupSinricPro() {
@@ -158,9 +240,12 @@ void setup() {
 
   setupRadio();
   setupWiFi();
+  setupTime();
   setupSinricPro();
 }
 
 void loop() {
   SinricPro.handle();
+  checkWiFiWatchdog();
+  checkDailyReboot();
 }
