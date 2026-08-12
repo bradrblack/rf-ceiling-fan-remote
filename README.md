@@ -80,6 +80,13 @@ The production firmware (`fan_control.cpp`) includes a few self-healing measures
 
 - **Bounded WiFi connect at boot** — if WiFi doesn't connect within 30s, it reboots and retries, instead of hanging forever.
 - **WiFi watchdog** — if WiFi drops and stays disconnected for 60s during normal operation, it reboots.
+- **Radio watchdog** — every 60s, re-checks that the CC1101 still answers over SPI (the same VERSION-register check done at boot). Catches the radio silently wedging mid-operation — a failure mode where WiFi/SinricPro stay connected (Google Assistant still gives its ack "beep") but the RF commands stop actually transmitting. Fixes itself with a reboot rather than needing a manual power cycle.
 - **Daily scheduled reboot** — once a day at 3am (`REBOOT_HOUR`, US Eastern via the `TZ_STRING` POSIX timezone string, DST-aware), it reboots proactively to guard against slow heap fragmentation from the long-running SinricPro WebSocket/TLS connection. Time is synced via NTP at boot.
 
 If you're deploying this outside US Eastern, update `TZ_STRING` in `fan_control.cpp` to your own [POSIX TZ string](https://developer.ibm.com/articles/au-aix-posix/).
+
+### Reboot notifications
+
+Since these self-healing reboots would otherwise happen silently, the reason for each one is written to flash (NVS) right before restarting, then read back and pushed as a [ntfy.sh](https://ntfy.sh) notification once WiFi reconnects on the next boot — so a device that's rebooting every 10 minutes shows up as a stream of pushes on your phone instead of going unnoticed. A normal manual power cycle leaves no reason behind, so it stays quiet.
+
+To enable it: pick a random, unguessable topic name (ntfy topics are unauthenticated — anyone who knows the exact name can read the notifications), set it as `NTFY_TOPIC` in `secrets.h`, and subscribe to that same topic in the [ntfy app](https://ntfy.sh/app) (iOS/Android) or web app.
