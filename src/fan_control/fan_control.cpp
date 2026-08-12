@@ -83,6 +83,7 @@ void recordRebootReason(const char *reason) {
 
 void sendNtfy(const String &title, const String &message) {
   if (WiFi.status() != WL_CONNECTED) return;
+  Serial.printf("[ntfy] Sending: \"%s\" - \"%s\"\r\n", title.c_str(), message.c_str());
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
