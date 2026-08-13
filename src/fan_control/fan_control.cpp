@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <time.h>
+#include <cstdarg>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
 #include "SinricPro.h"
@@ -64,6 +65,34 @@ const char* NTP_SERVER = "pool.ntp.org";
 int lastRebootDay = -1;
 
 // ==========================================
+// Timestamped logging
+// ==========================================
+// Prefixes every log line with the synced wall-clock time (once NTP has
+// synced) or uptime in seconds (before that / if sync ever fails), so log
+// output can be correlated with real time instead of just relative order.
+const char *logTimestamp() {
+  static char buf[32];
+  time_t now = time(nullptr);
+  if (now > 100000) {
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", &timeinfo);
+  } else {
+    snprintf(buf, sizeof(buf), "+%lus", millis() / 1000);
+  }
+  return buf;
+}
+
+void logf(const char *fmt, ...) {
+  char msg[192];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, args);
+  va_end(args);
+  Serial.printf("[%s] %s\r\n", logTimestamp(), msg);
+}
+
+// ==========================================
 // Reboot reporting (ntfy.sh)
 // ==========================================
 // The device otherwise self-heals silently -- to see *how often* that's
@@ -83,14 +112,14 @@ void recordRebootReason(const char *reason) {
 
 void sendNtfy(const String &title, const String &message) {
   if (WiFi.status() != WL_CONNECTED) return;
-  Serial.printf("[ntfy] Sending: \"%s\" - \"%s\"\r\n", title.c_str(), message.c_str());
+  logf("[ntfy] Sending: \"%s\" - \"%s\"", title.c_str(), message.c_str());
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
   if (!http.begin(client, String("https://ntfy.sh/") + NTFY_TOPIC)) return;
   http.addHeader("Title", title);
   int code = http.POST(message);
-  Serial.printf("[ntfy] POST status: %d\r\n", code);
+  logf("[ntfy] POST status: %d", code);
   http.end();
 }
 
@@ -136,7 +165,7 @@ void sendFanCode(int speed) {
 // "turn on/off the fan" -- the remote has no generic power-on code, so
 // powering on defaults to LOW speed.
 bool onFanPowerState(const String &deviceId, bool &state) {
-  Serial.printf("Fan power: %s\r\n", state ? "ON" : "OFF");
+  logf("Fan power: %s", state ? "ON" : "OFF");
   if (state) {
     fanSpeed = 1;
     sendFanCode(fanSpeed);
@@ -152,7 +181,7 @@ bool onFanRangeValue(const String &deviceId, int &rangeValue) {
   if (rangeValue < 1) rangeValue = 1;
   if (rangeValue > 3) rangeValue = 3;
   fanSpeed = rangeValue;
-  Serial.printf("Fan speed set to %d\r\n", fanSpeed);
+  logf("Fan speed set to %d", fanSpeed);
   sendFanCode(fanSpeed);
   return true;
 }
@@ -160,7 +189,7 @@ bool onFanRangeValue(const String &deviceId, int &rangeValue) {
 // relative changes, e.g. "increase the fan speed"
 bool onFanAdjustRangeValue(const String &deviceId, int &rangeValueDelta) {
   fanSpeed = constrain(fanSpeed + rangeValueDelta, 1, 3);
-  Serial.printf("Fan speed adjusted by %d to %d\r\n", rangeValueDelta, fanSpeed);
+  logf("Fan speed adjusted by %d to %d", rangeValueDelta, fanSpeed);
   sendFanCode(fanSpeed);
   rangeValueDelta = fanSpeed; // must return the new absolute value
   return true;
@@ -168,8 +197,8 @@ bool onFanAdjustRangeValue(const String &deviceId, int &rangeValueDelta) {
 
 // "turn on/off the light"
 bool onLightPowerState(const String &deviceId, bool &state) {
-  Serial.printf("Light requested: %s (currently tracked as %s)\r\n",
-                state ? "ON" : "OFF", lightState ? "ON" : "OFF");
+  logf("Light requested: %s (currently tracked as %s)",
+       state ? "ON" : "OFF", lightState ? "ON" : "OFF");
   if (state != lightState) {
     myRadio.send(RF_CODE_LIGHT, RF_BITLENGTH);
     lightState = state;
@@ -189,9 +218,9 @@ void setupRadio() {
   ELECHOUSE_cc1101.Init();
 
   if (ELECHOUSE_cc1101.getCC1101()) {
-    Serial.println("CC1101 Connection: SUCCESS");
+    logf("CC1101 Connection: SUCCESS");
   } else {
-    Serial.println("CC1101 Connection: FAILED. Check your wiring!");
+    logf("CC1101 Connection: FAILED. Check your wiring!");
   }
 
   ELECHOUSE_cc1101.setMHZ(RF_MHZ);
@@ -204,29 +233,31 @@ void setupRadio() {
 }
 
 void setupWiFi() {
-  Serial.printf("\r\n[WiFi]: Connecting");
+  logf("[WiFi]: Connecting");
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.printf(".");
+    Serial.print(".");
     delay(250);
     if (millis() - start > WIFI_CONNECT_TIMEOUT_MS) {
-      Serial.println("\r\n[WiFi]: Could not connect in time, rebooting...");
+      Serial.println();
+      logf("[WiFi]: Could not connect in time, rebooting...");
       recordRebootReason("WiFi connect timeout at boot");
       delay(100);
       ESP.restart();
     }
   }
-  Serial.printf("connected!\r\n[WiFi]: IP-Address is %s\r\n", WiFi.localIP().toString().c_str());
+  Serial.println();
+  logf("[WiFi]: IP-Address is %s", WiFi.localIP().toString().c_str());
 }
 
 void setupTime() {
   configTzTime(TZ_STRING, NTP_SERVER);
 
-  Serial.print("[NTP]: Syncing time");
+  logf("[NTP]: Syncing time");
   time_t now = time(nullptr);
   unsigned long start = millis();
   while (now < 100000 && millis() - start < 10000) {
@@ -234,9 +265,10 @@ void setupTime() {
     delay(250);
     now = time(nullptr);
   }
+  Serial.println();
 
   if (now < 100000) {
-    Serial.println(" failed to sync (will keep retrying in the background)");
+    logf("[NTP]: failed to sync (will keep retrying in the background)");
     return;
   }
 
@@ -244,7 +276,7 @@ void setupTime() {
   localtime_r(&now, &timeinfo);
   char buf[32];
   strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", &timeinfo);
-  Serial.printf(" synced: %s\r\n", buf);
+  logf("[NTP]: synced: %s", buf);
 }
 
 // Reboots if WiFi has been disconnected for too long. WiFi.setAutoReconnect
@@ -254,7 +286,7 @@ void checkWiFiWatchdog() {
     if (wifiDownSince == 0) {
       wifiDownSince = millis();
     } else if (millis() - wifiDownSince > WIFI_DOWN_REBOOT_MS) {
-      Serial.println("WiFi down too long, rebooting...");
+      logf("WiFi down too long, rebooting...");
       recordRebootReason("WiFi down watchdog");
       delay(100);
       ESP.restart();
@@ -272,7 +304,7 @@ void checkRadioWatchdog() {
   lastRadioCheck = millis();
 
   if (!ELECHOUSE_cc1101.getCC1101()) {
-    Serial.println("Radio watchdog: CC1101 not responding, rebooting...");
+    logf("Radio watchdog: CC1101 not responding, rebooting...");
     recordRebootReason("Radio watchdog: CC1101 not responding");
     delay(100);
     ESP.restart();
@@ -291,7 +323,7 @@ void checkDailyReboot() {
 
   if (timeinfo.tm_hour == REBOOT_HOUR && timeinfo.tm_mday != lastRebootDay) {
     lastRebootDay = timeinfo.tm_mday;
-    Serial.println("Scheduled daily reboot...");
+    logf("Scheduled daily reboot...");
     recordRebootReason("Daily scheduled reboot");
     delay(100);
     ESP.restart();
@@ -307,8 +339,8 @@ void setupSinricPro() {
   SinricProSwitch &myLight = SinricPro[LIGHT_ID];
   myLight.onPowerState(onLightPowerState);
 
-  SinricPro.onConnected([]() { Serial.printf("Connected to SinricPro\r\n"); });
-  SinricPro.onDisconnected([]() { Serial.printf("Disconnected from SinricPro\r\n"); });
+  SinricPro.onConnected([]() { logf("Connected to SinricPro"); });
+  SinricPro.onDisconnected([]() { logf("Disconnected from SinricPro"); });
 
   SinricPro.begin(APP_KEY, APP_SECRET);
 }
@@ -316,7 +348,8 @@ void setupSinricPro() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\r\n--- Fan/Light RF Controller ---");
+  Serial.println();
+  logf("--- Fan/Light RF Controller ---");
 
   setupRadio();
   setupWiFi();
