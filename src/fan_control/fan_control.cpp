@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <time.h>
 #include <cstdarg>
+#include <cstring>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
 #include "SinricPro.h"
@@ -57,12 +58,15 @@ unsigned long lastRadioCheck = 0;
 // 2nd Sunday of March and back on the 1st Sunday of November.
 #define TZ_STRING        "EST5EDT,M3.2.0,M11.1.0/2"
 #define REBOOT_HOUR      3
-// Proactive insurance against slow heap fragmentation, not a response to an
-// observed problem. Flip to false once the WiFi/radio watchdog reboot rate
-// has been observed for a while and this no longer seems worth it.
-#define ENABLE_DAILY_REBOOT true
 const char* NTP_SERVER = "pool.ntp.org";
 int lastRebootDay = -1;
+
+// The daily reboot is routine, not a symptom of a problem, so it's excluded
+// from ntfy notifications by default -- only the exception reboots (WiFi
+// timeout, WiFi watchdog, radio watchdog) are worth a push. Flip to true if
+// you want every reboot reported.
+#define NOTIFY_DAILY_REBOOT true
+#define REASON_DAILY_REBOOT "Daily scheduled reboot"
 
 // ==========================================
 // Timestamped logging
@@ -106,7 +110,11 @@ Preferences prefs;
 void recordRebootReason(const char *reason) {
   prefs.begin("fanctl", false);
   prefs.putString("last_reason", reason);
-  prefs.putUInt("reboot_count", prefs.getUInt("reboot_count", 0) + 1);
+  // The daily reboot isn't a symptom of anything -- only count exception
+  // reboots, so "reboot #N" actually signals something went wrong N times.
+  if (strcmp(reason, REASON_DAILY_REBOOT) != 0) {
+    prefs.putUInt("reboot_count", prefs.getUInt("reboot_count", 0) + 1);
+  }
   prefs.end();
 }
 
@@ -132,10 +140,11 @@ void notifyLastReboot() {
   }
   prefs.end();
 
-  if (reason.length() > 0) {
-    sendNtfy("Fan controller rebooted",
-             reason + " (reboot #" + String(count) + ")");
-  }
+  if (reason.length() == 0) return;
+  if (!NOTIFY_DAILY_REBOOT && reason == REASON_DAILY_REBOOT) return;
+
+  sendNtfy("Fan controller rebooted",
+           reason + " (reboot #" + String(count) + ") at " + logTimestamp());
 }
 
 RCSwitch myRadio = RCSwitch();
@@ -255,8 +264,6 @@ void setupWiFi() {
 }
 
 void setupTime() {
-  configTzTime(TZ_STRING, NTP_SERVER);
-
   logf("[NTP]: Syncing time");
   time_t now = time(nullptr);
   unsigned long start = millis();
@@ -313,8 +320,6 @@ void checkRadioWatchdog() {
 
 // Reboots once per day at REBOOT_HOUR local time (see TZ_STRING above).
 void checkDailyReboot() {
-  if (!ENABLE_DAILY_REBOOT) return;
-
   time_t now = time(nullptr);
   if (now < 100000) return; // NTP hasn't synced yet
 
@@ -323,8 +328,16 @@ void checkDailyReboot() {
 
   if (timeinfo.tm_hour == REBOOT_HOUR && timeinfo.tm_mday != lastRebootDay) {
     lastRebootDay = timeinfo.tm_mday;
+    // Persisted to NVS, not just RAM: lastRebootDay would otherwise reset to
+    // -1 on the very reboot this triggers, so the next boot's first check
+    // (still inside the same REBOOT_HOUR window) would see "not rebooted
+    // today yet" and immediately reboot again -- looping for the rest of
+    // the hour instead of reboot-once-per-day.
+    prefs.begin("fanctl", false);
+    prefs.putInt("last_reboot_day", lastRebootDay);
+    prefs.end();
     logf("Scheduled daily reboot...");
-    recordRebootReason("Daily scheduled reboot");
+    recordRebootReason(REASON_DAILY_REBOOT);
     delay(100);
     ESP.restart();
   }
@@ -349,12 +362,23 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println();
+
+  // Set the timezone before any logging happens. The RTC survives a soft
+  // reset (only a real power loss clears it), so time() can already return
+  // a valid epoch at the very start of boot -- without the TZ set yet,
+  // early log lines would misinterpret that as UTC/GMT instead of EDT.
+  configTzTime(TZ_STRING, NTP_SERVER);
+
   logf("--- Fan/Light RF Controller ---");
+
+  prefs.begin("fanctl", true); // read-only
+  lastRebootDay = prefs.getInt("last_reboot_day", -1);
+  prefs.end();
 
   setupRadio();
   setupWiFi();
-  notifyLastReboot();
   setupTime();
+  notifyLastReboot();
   setupSinricPro();
 }
 
