@@ -82,6 +82,7 @@ The production firmware (`fan_control.cpp`) includes a few self-healing measures
 - **WiFi watchdog** — if WiFi drops and stays disconnected for 60s during normal operation, it reboots.
 - **Radio watchdog** — every 60s, re-checks that the CC1101 still answers over SPI (the same VERSION-register check done at boot). Catches the radio silently wedging mid-operation — a failure mode where WiFi/SinricPro stay connected (Google Assistant still gives its ack "beep") but the RF commands stop actually transmitting. Fixes itself with a reboot rather than needing a manual power cycle.
 - **Daily scheduled reboot** — once a day at 3am (`REBOOT_HOUR`, US Eastern via the `TZ_STRING` POSIX timezone string, DST-aware), it reboots proactively to guard against slow heap fragmentation from the long-running SinricPro WebSocket/TLS connection. Time is synced via NTP at boot.
+- **Unexpected reset detection** — a crash, a hung SSL/network stack triggering the hardware watchdog, a brownout, etc. bypass the above watchdogs entirely, since they reset the chip before any of our own code gets to run. On the next boot, `esp_reset_reason()` is checked against the reset that just happened; if it wasn't a normal power cycle/reset button press or one of our own deliberate `ESP.restart()` calls, it's reported the same way the other reboots are, instead of leaving an unexplained gap.
 
 If you're deploying this outside US Eastern, update `TZ_STRING` in `fan_control.cpp` to your own [POSIX TZ string](https://developer.ibm.com/articles/au-aix-posix/).
 

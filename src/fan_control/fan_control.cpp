@@ -6,6 +6,7 @@
 #include <time.h>
 #include <cstdarg>
 #include <cstring>
+#include <esp_system.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
 #include "SinricPro.h"
@@ -116,6 +117,41 @@ void recordRebootReason(const char *reason) {
     prefs.putUInt("reboot_count", prefs.getUInt("reboot_count", 0) + 1);
   }
   prefs.end();
+}
+
+// Detects a reboot that bypassed our own recordRebootReason() calls entirely
+// -- a crash, a hung SSL/network stack triggering the hardware watchdog,
+// a brownout, etc. Those resets happen before our code gets a chance to run,
+// so without this they're invisible: no log line, no ntfy notification, just
+// a gap. Must run before anything else in setup() could call
+// recordRebootReason() for this boot cycle (e.g. a WiFi connect timeout),
+// since it decides based on whether a reason is already recorded.
+void checkUnexpectedReset() {
+  prefs.begin("fanctl", true);
+  String reason = prefs.getString("last_reason", "");
+  prefs.end();
+  if (reason.length() > 0) return; // a deliberate reboot already recorded this
+
+  esp_reset_reason_t r = esp_reset_reason();
+  // POWERON/EXT are manual power cycles or the reset button -- stay quiet,
+  // same as any other manual power cycle. SW is our own ESP.restart(),
+  // which would already have recorded a reason if it came from our code.
+  if (r == ESP_RST_POWERON || r == ESP_RST_EXT || r == ESP_RST_SW) return;
+
+  const char *desc;
+  switch (r) {
+    case ESP_RST_PANIC:     desc = "crash/panic"; break;
+    case ESP_RST_INT_WDT:   desc = "interrupt watchdog"; break;
+    case ESP_RST_TASK_WDT:  desc = "task watchdog"; break;
+    case ESP_RST_WDT:       desc = "other watchdog"; break;
+    case ESP_RST_BROWNOUT:  desc = "brownout"; break;
+    case ESP_RST_DEEPSLEEP: desc = "deep sleep wake"; break;
+    case ESP_RST_SDIO:      desc = "SDIO"; break;
+    default:                desc = "unknown"; break;
+  }
+  char buf[48];
+  snprintf(buf, sizeof(buf), "Unexpected reset (%s)", desc);
+  recordRebootReason(buf);
 }
 
 void sendNtfy(const String &title, const String &message) {
@@ -374,6 +410,8 @@ void setup() {
   prefs.begin("fanctl", true); // read-only
   lastRebootDay = prefs.getInt("last_reboot_day", -1);
   prefs.end();
+
+  checkUnexpectedReset();
 
   setupRadio();
   setupWiFi();
