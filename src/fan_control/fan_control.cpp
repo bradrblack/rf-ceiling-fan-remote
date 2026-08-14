@@ -6,6 +6,7 @@
 #include <time.h>
 #include <cstdarg>
 #include <cstring>
+#include <cstdlib>
 #include <esp_system.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
@@ -51,6 +52,16 @@ unsigned long wifiDownSince = 0;
 // but sendFanCode()/onLightPowerState() stop actually transmitting anything.
 const unsigned long RADIO_CHECK_INTERVAL_MS = 60000;
 unsigned long lastRadioCheck = 0;
+
+// Detects the wall clock (time()) jumping relative to uptime (millis()).
+// The SNTP client re-syncs periodically in the background, not just at
+// boot -- if the RTC came up wrong after a hard reset, a later resync can
+// silently snap the clock by minutes or hours, making every log timestamp
+// since boot misleading with no visible indication it happened.
+const unsigned long CLOCK_CHECK_INTERVAL_MS = 30000;
+const long CLOCK_JUMP_THRESHOLD_SEC = 120; // ignore ordinary small NTP drift corrections
+unsigned long lastClockCheckMillis = 0;
+time_t lastClockCheckTime = 0;
 
 // Scheduled reboot once a day, at a fixed local hour, to guard against slow
 // heap fragmentation from a long-running WebSocket/TLS/JSON connection.
@@ -354,6 +365,28 @@ void checkRadioWatchdog() {
   }
 }
 
+// Logs when the wall clock has moved by more than CLOCK_JUMP_THRESHOLD_SEC
+// relative to how much uptime actually elapsed, so a background NTP
+// correction is visible in the log instead of just silently making earlier
+// timestamps this boot look wrong in hindsight.
+void checkClockJump() {
+  if (millis() - lastClockCheckMillis < CLOCK_CHECK_INTERVAL_MS) return;
+  unsigned long nowMillis = millis();
+  time_t now = time(nullptr);
+
+  if (now > 100000 && lastClockCheckTime > 100000) {
+    long expectedDeltaSec = (long)((nowMillis - lastClockCheckMillis) / 1000);
+    long actualDeltaSec = (long)(now - lastClockCheckTime);
+    long jump = actualDeltaSec - expectedDeltaSec;
+    if (labs(jump) > CLOCK_JUMP_THRESHOLD_SEC) {
+      logf("Clock jump detected: wall clock moved %+ld s relative to uptime", jump);
+    }
+  }
+
+  lastClockCheckMillis = nowMillis;
+  lastClockCheckTime = now;
+}
+
 // Reboots once per day at REBOOT_HOUR local time (see TZ_STRING above).
 void checkDailyReboot() {
   time_t now = time(nullptr);
@@ -424,5 +457,6 @@ void loop() {
   SinricPro.handle();
   checkWiFiWatchdog();
   checkRadioWatchdog();
+  checkClockJump();
   checkDailyReboot();
 }
