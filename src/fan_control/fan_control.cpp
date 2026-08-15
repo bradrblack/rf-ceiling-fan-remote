@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <esp_system.h>
+#include <esp32c3/rom/rtc.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
 #include "SinricPro.h"
@@ -148,6 +149,14 @@ void checkUnexpectedReset() {
   // same as any other manual power cycle. SW is our own ESP.restart(),
   // which would already have recorded a reason if it came from our code.
   if (r == ESP_RST_POWERON || r == ESP_RST_EXT || r == ESP_RST_SW) return;
+
+  // esp_reset_reason() doesn't classify a reset triggered by a serial tool
+  // toggling RTS (esptool during flashing, or opening a monitor) on this
+  // IDF version -- it falls through to ESP_RST_UNKNOWN alongside genuine
+  // crashes. Check the raw hardware reset-reason code directly so flashing/
+  // monitoring the device doesn't generate a false "unexpected reset" alert.
+  RESET_REASON raw = rtc_get_reset_reason(0);
+  if (raw == USB_UART_CHIP_RESET || raw == USB_JTAG_CHIP_RESET) return;
 
   const char *desc;
   switch (r) {
@@ -387,6 +396,27 @@ void checkClockJump() {
   lastClockCheckTime = now;
 }
 
+// Each SinricPro reconnect needs a large contiguous heap block for its TLS
+// context (~40KB+); on a 320KB chip with days of JSON/String churn, heap
+// fragmentation could make that allocation intermittently fail even with
+// plenty of *total* free heap left. getMaxAllocHeap() (largest contiguous
+// free block) is what actually predicts that, unlike getFreeHeap() alone --
+// logged periodically to see the trend, and right at disconnect time to
+// correlate drops with fragmentation.
+const unsigned long HEAP_LOG_INTERVAL_MS = 600000; // 10 min
+unsigned long lastHeapLogMillis = 0;
+
+void logHeapStats(const char *context) {
+  logf("Heap: %u free, %u largest free block (%s)",
+       ESP.getFreeHeap(), ESP.getMaxAllocHeap(), context);
+}
+
+void checkHeapStats() {
+  if (millis() - lastHeapLogMillis < HEAP_LOG_INTERVAL_MS) return;
+  lastHeapLogMillis = millis();
+  logHeapStats("periodic");
+}
+
 // Reboots once per day at REBOOT_HOUR local time (see TZ_STRING above).
 void checkDailyReboot() {
   time_t now = time(nullptr);
@@ -422,7 +452,10 @@ void setupSinricPro() {
   myLight.onPowerState(onLightPowerState);
 
   SinricPro.onConnected([]() { logf("Connected to SinricPro"); });
-  SinricPro.onDisconnected([]() { logf("Disconnected from SinricPro"); });
+  SinricPro.onDisconnected([]() {
+    logf("Disconnected from SinricPro");
+    logHeapStats("at disconnect");
+  });
 
   SinricPro.begin(APP_KEY, APP_SECRET);
 }
@@ -458,5 +491,6 @@ void loop() {
   checkWiFiWatchdog();
   checkRadioWatchdog();
   checkClockJump();
+  checkHeapStats();
   checkDailyReboot();
 }
