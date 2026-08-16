@@ -396,27 +396,6 @@ void checkClockJump() {
   lastClockCheckTime = now;
 }
 
-// Each SinricPro reconnect needs a large contiguous heap block for its TLS
-// context (~40KB+); on a 320KB chip with days of JSON/String churn, heap
-// fragmentation could make that allocation intermittently fail even with
-// plenty of *total* free heap left. getMaxAllocHeap() (largest contiguous
-// free block) is what actually predicts that, unlike getFreeHeap() alone --
-// logged periodically to see the trend, and right at disconnect time to
-// correlate drops with fragmentation.
-const unsigned long HEAP_LOG_INTERVAL_MS = 600000; // 10 min
-unsigned long lastHeapLogMillis = 0;
-
-void logHeapStats(const char *context) {
-  logf("Heap: %u free, %u largest free block (%s)",
-       ESP.getFreeHeap(), ESP.getMaxAllocHeap(), context);
-}
-
-void checkHeapStats() {
-  if (millis() - lastHeapLogMillis < HEAP_LOG_INTERVAL_MS) return;
-  lastHeapLogMillis = millis();
-  logHeapStats("periodic");
-}
-
 // Reboots once per day at REBOOT_HOUR local time (see TZ_STRING above).
 void checkDailyReboot() {
   time_t now = time(nullptr);
@@ -452,10 +431,7 @@ void setupSinricPro() {
   myLight.onPowerState(onLightPowerState);
 
   SinricPro.onConnected([]() { logf("Connected to SinricPro"); });
-  SinricPro.onDisconnected([]() {
-    logf("Disconnected from SinricPro");
-    logHeapStats("at disconnect");
-  });
+  SinricPro.onDisconnected([]() { logf("Disconnected from SinricPro"); });
 
   SinricPro.begin(APP_KEY, APP_SECRET);
 }
@@ -491,6 +467,5 @@ void loop() {
   checkWiFiWatchdog();
   checkRadioWatchdog();
   checkClockJump();
-  checkHeapStats();
   checkDailyReboot();
 }
