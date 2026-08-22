@@ -47,6 +47,15 @@ const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000;
 const unsigned long WIFI_DOWN_REBOOT_MS     = 60000;
 unsigned long wifiDownSince = 0;
 
+// WiFi.status() staying connected doesn't mean SinricPro is reachable --
+// seen in the field: WiFi stayed associated for over an hour while
+// SinricPro itself was unreachable (DNS/TLS failures), with no watchdog
+// catching it since that failure is invisible to WiFi.status(). Tracks
+// time since the last successful SinricPro connection independently and
+// reboots if it's been too long, regardless of WiFi state.
+const unsigned long SINRIC_DOWN_REBOOT_MS = 600000; // 10 min
+unsigned long sinricDownSince = 0;
+
 // Periodically confirms the CC1101 is still answering over SPI (same
 // VERSION-register check used at boot). Catches the radio silently wedging
 // mid-operation -- SinricPro/WiFi stay up (Google still hears an ack "beep")
@@ -359,6 +368,26 @@ void checkWiFiWatchdog() {
   }
 }
 
+// Reboots if SinricPro has been unreachable for too long, independent of
+// WiFi.status() (see comment above SINRIC_DOWN_REBOOT_MS). isConnected()
+// is a live poll straight through to the underlying WebSocket client, not
+// a cached flag, so there's no window where a missed callback would leave
+// this stuck on stale state.
+void checkSinricWatchdog() {
+  if (!SinricPro.isConnected()) {
+    if (sinricDownSince == 0) {
+      sinricDownSince = millis();
+    } else if (millis() - sinricDownSince > SINRIC_DOWN_REBOOT_MS) {
+      logf("SinricPro down too long, rebooting...");
+      recordRebootReason("SinricPro down watchdog");
+      delay(100);
+      ESP.restart();
+    }
+  } else {
+    sinricDownSince = 0;
+  }
+}
+
 // Reboots if the CC1101 stops answering over SPI mid-operation. This is the
 // failure mode where SinricPro/WiFi stay connected (Google still hears an
 // ack) but sendFanCode()/onLightPowerState() silently stop transmitting.
@@ -465,6 +494,7 @@ void setup() {
 void loop() {
   SinricPro.handle();
   checkWiFiWatchdog();
+  checkSinricWatchdog();
   checkRadioWatchdog();
   checkClockJump();
   checkDailyReboot();
