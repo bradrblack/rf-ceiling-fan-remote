@@ -39,6 +39,7 @@ This is a multi-sketch PlatformIO project — each `.ino`/`.cpp` lives in its ow
 | `c3_mini` (default) | `src/sniff.ino` | Listens on the CC1101 and prints the decimal code, bit length, protocol number, and pulse length for every button pressed on the physical remote. Run this first to capture your own remote's codes. |
 | `c3_mini_tx` | `src/tx_test/` | Standalone transmit test — sends a single code on a timer, used for bench-testing range and signal timing independent of SinricPro/WiFi. |
 | `c3_mini_fan` | `src/fan_control/` | The production firmware: connects to WiFi and SinricPro, and re-transmits the correct RF code when a fan or light command comes in. |
+| `c3_mini_fan_public` | `src/fan_control_public/` | Same as `c3_mini_fan`, but for sharing with someone else who has the same fan/remote hardware — see [For other users](#for-other-users) below. |
 
 Build/upload a specific environment with:
 ```
@@ -69,6 +70,21 @@ If you're cloning this for a different remote, re-run `sniff.ino` and update the
 3. **Fill in credentials** — copy `src/fan_control/secrets.h.example` to `src/fan_control/secrets.h` (gitignored) and fill in your WiFi SSID/password, SinricPro App Key/Secret, and both device IDs.
 4. **Flash the production firmware**: `pio run -e c3_mini_fan -t upload`
 5. **Link SinricPro to Google Home** from the Google Home app (Works with Google / SinricPro integration) — the fan and light will show up as native devices, controllable by voice with no fixed phrase list.
+
+## For other users
+
+`c3_mini_fan` (above) compiles your WiFi and SinricPro credentials in from `secrets.h`, which is convenient for one device you control but means sharing it with someone else requires them to edit and rebuild the source. `c3_mini_fan_public` (`src/fan_control_public/`) is the same firmware — same CC1101 wiring, same RF codes/watchdogs/reliability behavior — but collects WiFi and SinricPro credentials at first boot through a [WiFiManager](https://github.com/tzapu/WiFiManager) captive portal instead, so someone with the **same fan/remote hardware** can flash it and configure it themselves without touching any code.
+
+This only replaces the WiFi/SinricPro *credentials* — the RF codes, CC1101 pins, and RF frequency/protocol are still compile-time constants in the source, since those are specific to this exact fan/remote model. It's for sharing the same physical build, not a general-purpose RF-cloning tool.
+
+Setup, for the person flashing it:
+
+1. **Flash it**: `pio run -e c3_mini_fan_public -t upload` (no `secrets.h` needed for this target).
+2. **Connect to the setup network** — on first boot (or whenever it can't connect to a previously saved WiFi network), it opens a WiFi access point named `FanControllerSetup`. Connect to it from a phone or laptop.
+3. **Fill in the portal** — a captive portal page should open automatically (or navigate to `192.168.4.1`); choose your home WiFi network and enter its password, plus your own SinricPro App Key, App Secret, Fan device ID, and Light device ID (from your own SinricPro account — see [Setup](#setup) above for creating those devices).
+4. Submit — the device saves those to flash, connects to your WiFi, and starts talking to SinricPro. If it ever fails to connect (e.g. moved to a new network), it automatically reopens the `FanControllerSetup` portal.
+
+Unlike `c3_mini_fan`, this build has no ntfy.sh push notifications — reboot reasons are still logged to serial for anyone debugging, just not pushed anywhere, to keep the shared build simpler and dependency-free for other users.
 
 ## Known limitation
 
