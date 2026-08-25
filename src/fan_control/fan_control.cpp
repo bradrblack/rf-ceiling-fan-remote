@@ -17,6 +17,18 @@
 
 #include "secrets.h"
 
+// Bump this on each flash you want to be able to identify later (e.g. to
+// confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
+#define FIRMWARE_VERSION "2026-08-25r1"
+
+const char *BANNER =
+R"( ____  _____   _____
+ |  _ \|  ___| |  ___|_ _ _ __
+ | |_) | |_    | |_ / _` | '_ \
+ |  _ <|  _|   |  _| (_| | | | |
+ |_| \_\_|     |_|  \__,_|_| |_|
+                                )";
+
 // ==========================================
 // CC1101 wiring (ESP32-C3 Super Mini) -- same as sniff.ino / tx_test.cpp
 // ==========================================
@@ -503,6 +515,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println();
+  Serial.println(BANNER);
 
   // Set the timezone before any logging happens. The RTC survives a soft
   // reset (only a real power loss clears it), so time() can already return
@@ -510,7 +523,7 @@ void setup() {
   // early log lines would misinterpret that as UTC/GMT instead of EDT.
   configTzTime(TZ_STRING, NTP_SERVER);
 
-  logf("--- Fan/Light RF Controller ---");
+  logf("--- Fan/Light RF Controller v%s ---", FIRMWARE_VERSION);
 
   prefs.begin("fanctl", true); // read-only
   lastRebootDay = prefs.getInt("last_reboot_day", -1);
