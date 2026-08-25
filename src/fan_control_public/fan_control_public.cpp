@@ -18,10 +18,10 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-25r1"
+#define FIRMWARE_VERSION "2026-08-25r2"
 
 const char *BANNER =
-R"( ____  _____   _____
+R"(  ____  _____   _____
  |  _ \|  ___| |  ___|_ _ _ __
  | |_) | |_    | |_ / _` | '_ \
  |  _ <|  _|   |  _| (_| | | | |
