@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
 #include <Preferences.h>
 #include <time.h>
 #include <cstdarg>
@@ -42,6 +44,14 @@
 #define LED_ON          LOW
 #define LED_OFF         HIGH
 #define LED_BLINK_MS    500
+
+// BOOT button on most ESP32-C3 boards -- confirm yours has one before
+// relying on this. Held for FACTORY_RESET_HOLD_MS during normal operation,
+// it wipes saved WiFi + SinricPro config and reboots into the setup portal
+// (e.g. to move the device to a new WiFi network, or to reach WiFiManager's
+// built-in "Update" page to flash new firmware over the air with no cable).
+#define FACTORY_RESET_PIN      9
+#define FACTORY_RESET_HOLD_MS  10000
 
 #define RF_MHZ          304.25
 #define RF_PROTOCOL     11
@@ -238,6 +248,38 @@ void checkLedBlink() {
   }
 }
 
+// Holding FACTORY_RESET_PIN low for FACTORY_RESET_HOLD_MS wipes saved WiFi
+// + SinricPro config (the "fanwm" Preferences namespace) and reboots into
+// the WiFiManager setup portal. WiFi.disconnect(true, true) mirrors what
+// WiFiManager's own resetSettings() does on ESP32 -- done directly here
+// since the WiFiManager instance itself is local to setupWiFiManager() and
+// out of scope by the time loop() is running.
+unsigned long resetButtonDownSince = 0;
+
+void checkFactoryResetButton() {
+  if (digitalRead(FACTORY_RESET_PIN) == LOW) {
+    if (resetButtonDownSince == 0) {
+      resetButtonDownSince = millis();
+    } else if (millis() - resetButtonDownSince > FACTORY_RESET_HOLD_MS) {
+      logf("Factory reset button held, wiping WiFi/SinricPro config and rebooting...");
+      for (int i = 0; i < 6; i++) {
+        digitalWrite(LED_PIN, LED_ON);
+        delay(80);
+        digitalWrite(LED_PIN, LED_OFF);
+        delay(80);
+      }
+      prefs.begin("fanwm", false);
+      prefs.clear();
+      prefs.end();
+      WiFi.disconnect(true, true);
+      delay(100);
+      ESP.restart();
+    }
+  } else {
+    resetButtonDownSince = 0;
+  }
+}
+
 void sendFanCode(int speed) {
   switch (speed) {
     case 1: myRadio.send(RF_CODE_FAN_LOW, RF_BITLENGTH); break;
@@ -306,11 +348,19 @@ bool onLightPowerState(const String &deviceId, bool &state) {
 // network), WiFiManager automatically reopens the portal.
 #define SETUP_AP_NAME "FanControllerSetup"
 #define WIFI_PORTAL_TIMEOUT_SEC 300 // give up and retry rather than hold the portal open forever
+#define DEFAULT_HOSTNAME "myfan"
 
 char appKey[40] = "";
 char appSecret[96] = "";
 char fanId[36] = "";
 char lightId[36] = "";
+// Used as both the DHCP/mDNS hostname (reachable at <hostname>.local) and
+// the ArduinoOTA device name. Defaults to "myfan"; overridable in the
+// portal like the SinricPro fields. A change made in the same portal
+// session as initial WiFi setup won't take effect until the next connect,
+// since WiFi.setHostname() has to run before autoConnect() -- i.e. before
+// this field's new value is even readable.
+char hostname[32] = DEFAULT_HOSTNAME;
 
 bool shouldSaveSinricConfig = false;
 void onSaveSinricConfig() { shouldSaveSinricConfig = true; }
@@ -321,6 +371,7 @@ void loadSinricConfig() {
   prefs.getString("app_secret", appSecret, sizeof(appSecret));
   prefs.getString("fan_id", fanId, sizeof(fanId));
   prefs.getString("light_id", lightId, sizeof(lightId));
+  prefs.getString("hostname", hostname, sizeof(hostname));
   prefs.end();
 }
 
@@ -330,6 +381,7 @@ void saveSinricConfig() {
   prefs.putString("app_secret", appSecret);
   prefs.putString("fan_id", fanId);
   prefs.putString("light_id", lightId);
+  prefs.putString("hostname", hostname);
   prefs.end();
 }
 
@@ -340,6 +392,7 @@ void setupWiFiManager() {
   WiFiManagerParameter customAppSecret("appsecret", "SinricPro App Secret", appSecret, sizeof(appSecret));
   WiFiManagerParameter customFanId("fanid", "SinricPro Fan Device ID", fanId, sizeof(fanId));
   WiFiManagerParameter customLightId("lightid", "SinricPro Light Device ID", lightId, sizeof(lightId));
+  WiFiManagerParameter customHostname("hostname", "Device hostname (e.g. myfan -&gt; myfan.local)", hostname, sizeof(hostname));
 
   WiFiManager wm;
   wm.setTitle("Fan Controller");
@@ -348,7 +401,12 @@ void setupWiFiManager() {
   wm.addParameter(&customAppSecret);
   wm.addParameter(&customFanId);
   wm.addParameter(&customLightId);
+  wm.addParameter(&customHostname);
   wm.setConfigPortalTimeout(WIFI_PORTAL_TIMEOUT_SEC);
+
+  // Must happen before autoConnect(), since that's what actually associates
+  // and does the DHCP handshake (which is when the hostname gets sent).
+  WiFi.setHostname(hostname);
 
   logf("[WiFi]: Connecting (or opening \"%s\" setup portal if needed)", SETUP_AP_NAME);
   if (!wm.autoConnect(SETUP_AP_NAME)) {
@@ -367,6 +425,8 @@ void setupWiFiManager() {
   fanId[sizeof(fanId) - 1] = '\0';
   strncpy(lightId, customLightId.getValue(), sizeof(lightId) - 1);
   lightId[sizeof(lightId) - 1] = '\0';
+  strncpy(hostname, customHostname.getValue(), sizeof(hostname) - 1);
+  hostname[sizeof(hostname) - 1] = '\0';
 
   if (shouldSaveSinricConfig) {
     saveSinricConfig();
@@ -376,6 +436,21 @@ void setupWiFiManager() {
   WiFi.setAutoReconnect(true);
 }
 
+void setupNetworkExtras() {
+  if (MDNS.begin(hostname)) {
+    logf("[mDNS]: responding as %s.local", hostname);
+  } else {
+    logf("[mDNS]: failed to start");
+  }
+
+  ArduinoOTA.setHostname(hostname);
+  ArduinoOTA.onStart([]() { logf("[OTA]: update starting..."); });
+  ArduinoOTA.onEnd([]() { logf("[OTA]: update complete, rebooting..."); });
+  ArduinoOTA.onError([](ota_error_t error) { logf("[OTA]: error [%u]", error); });
+  ArduinoOTA.begin();
+  logf("[OTA]: ready -- pio run -e c3_mini_fan_public -t upload --upload-port %s.local", hostname);
+}
+
 // ==========================================
 // Setup
 // ==========================================
@@ -383,6 +458,7 @@ void setupWiFiManager() {
 void setupRadio() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LED_OFF);
+  pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
 
   ELECHOUSE_cc1101.setSpiPin(C3_CC1101_CLK, C3_CC1101_MISO, C3_CC1101_MOSI, C3_CC1101_CS);
 
@@ -563,6 +639,7 @@ void setup() {
 
   setupRadio();
   setupWiFiManager();
+  setupNetworkExtras();
   setupTime();
   logLastRebootReason();
   setupSinricPro();
@@ -570,10 +647,12 @@ void setup() {
 
 void loop() {
   SinricPro.handle();
+  ArduinoOTA.handle();
   checkWiFiWatchdog();
   checkSinricWatchdog();
   checkRadioWatchdog();
   checkClockJump();
   checkDailyReboot();
   checkLedBlink();
+  checkFactoryResetButton();
 }

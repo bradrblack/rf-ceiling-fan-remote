@@ -81,10 +81,21 @@ Setup, for the person flashing it:
 
 1. **Flash it**: `pio run -e c3_mini_fan_public -t upload` (no `secrets.h` needed for this target).
 2. **Connect to the setup network** — on first boot (or whenever it can't connect to a previously saved WiFi network), it opens a WiFi access point named `FanControllerSetup`. Connect to it from a phone or laptop.
-3. **Fill in the portal** — a captive portal page should open automatically (or navigate to `192.168.4.1`); choose your home WiFi network and enter its password, plus your own SinricPro App Key, App Secret, Fan device ID, and Light device ID (from your own SinricPro account — see [Setup](#setup) above for creating those devices).
+3. **Fill in the portal** — a captive portal page should open automatically (or navigate to `192.168.4.1`); choose your home WiFi network and enter its password, plus your own SinricPro App Key, App Secret, Fan device ID, and Light device ID (from your own SinricPro account — see [Setup](#setup) above for creating those devices), and optionally a device hostname (defaults to `myfan`, see below).
 4. Submit — the device saves those to flash, connects to your WiFi, and starts talking to SinricPro. If it ever fails to connect (e.g. moved to a new network), it automatically reopens the `FanControllerSetup` portal.
 
 Unlike `c3_mini_fan`, this build has no ntfy.sh push notifications — reboot reasons are still logged to serial for anyone debugging, just not pushed anywhere, to keep the shared build simpler and dependency-free for other users.
+
+### Hostname, mDNS, and OTA updates
+
+The device is reachable on the local network at `http://<hostname>.local` (default hostname `myfan`, changeable in the setup portal). This is used for:
+
+- **OTA flashing during development**: `pio run -e c3_mini_fan_public -t upload --upload-port myfan.local` flashes over WiFi instead of USB.
+- **Firmware updates without a cable, for anyone**: hold the **BOOT button** (GPIO9 on most ESP32-C3 boards) for 10 seconds to wipe the saved WiFi/SinricPro config and reboot into the `FanControllerSetup` portal — then, instead of (or in addition to) reconfiguring WiFi, use the portal's built-in **Update** page to upload a `.bin` firmware file directly from a browser. This is a stock WiFiManager feature, not custom code. Note the setup AP is open/unauthenticated by default, so this window is only as secure as who can join your WiFi during the brief time it's active.
+
+### Multiple fan units
+
+If you have more than one of these controllers on the same network (e.g. the remote's DIP switch supports multiple fans with different RF codes per unit), give each one a distinct hostname in the setup portal so they don't collide on the network — `myfan`, `myfan2`, etc.
 
 ## Known limitation
 
