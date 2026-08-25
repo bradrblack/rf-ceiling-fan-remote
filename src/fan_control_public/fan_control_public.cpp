@@ -18,7 +18,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-25r3"
+#define FIRMWARE_VERSION "2026-08-25r4"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -279,6 +279,7 @@ void checkFactoryResetButton() {
   if (digitalRead(FACTORY_RESET_PIN) == LOW) {
     if (resetButtonDownSince == 0) {
       resetButtonDownSince = millis();
+      logf("Factory reset button pressed -- hold for %lus to reset", FACTORY_RESET_HOLD_MS / 1000);
     } else if (millis() - resetButtonDownSince > FACTORY_RESET_HOLD_MS) {
       logf("Factory reset button held, wiping WiFi/SinricPro config and rebooting...");
       for (int i = 0; i < 6; i++) {
