@@ -18,7 +18,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-25r4"
+#define FIRMWARE_VERSION "2026-08-25r5"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -291,6 +291,14 @@ void checkFactoryResetButton() {
       prefs.begin("fanwm", false);
       prefs.clear();
       prefs.end();
+      // Must be in STA mode before disconnect(true, true) will actually
+      // erase the saved WiFi credentials -- matches what WiFiManager's own
+      // resetSettings() does internally ("must be sta to disconnect
+      // erase"). Without this, the erase silently doesn't take effect and
+      // the next boot reconnects using the old saved AP instead of opening
+      // the portal.
+      WiFi.mode(WIFI_STA);
+      delay(500);
       WiFi.disconnect(true, true);
       delay(100);
       ESP.restart();
