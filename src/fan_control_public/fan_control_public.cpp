@@ -419,6 +419,16 @@ void setupWiFiManager() {
   wm.addParameter(&customHostname);
   wm.setConfigPortalTimeout(WIFI_PORTAL_TIMEOUT_SEC);
 
+  // Force a clean radio reset before autoConnect() decides whether to try
+  // a normal STA connect or fall back to the AP/portal. Without this, a
+  // phone joining the SoftAP right as it starts (transitioning from a
+  // failed/nonexistent STA attempt) can time out on DHCP and self-assign a
+  // 169.254.x.x link-local address instead of getting a real lease -- a
+  // commonly-reported WiFiManager symptom, seen in the field on this
+  // build's first setup attempt.
+  WiFi.mode(WIFI_OFF);
+  delay(200);
+
   // Must happen before autoConnect(), since that's what actually associates
   // and does the DHCP handshake (which is when the hostname gets sent).
   WiFi.setHostname(hostname);
