@@ -19,15 +19,15 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-25r2"
+#define FIRMWARE_VERSION "2026-08-25r3"
 
 const char *BANNER =
-R"(  ____  _____   _____
- |  _ \|  ___| |  ___|_ _ _ __
- | |_) | |_    | |_ / _` | '_ \
- |  _ <|  _|   |  _| (_| | | | |
- |_| \_\_|     |_|  \__,_|_| |_|
-                                )";
+R"(  __  __         _____
+ |  \/  |_   _  |  ___|_ _ _ __
+ | |\/| | | | | | |_ / _` | '_ \
+ | |  | | |_| | |  _| (_| | | | |
+ |_|  |_|\__, | |_|  \__,_|_| |_|
+         |___/                  )";
 
 // ==========================================
 // CC1101 wiring (ESP32-C3 Super Mini) -- same as sniff.ino / tx_test.cpp
