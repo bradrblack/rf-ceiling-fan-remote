@@ -219,6 +219,13 @@ void logLastRebootReason() {
 
 RCSwitch myRadio = RCSwitch();
 
+// Set once in setupRadio() based on whether the CC1101 actually responded.
+// Lets WiFi/SinricPro/portal testing proceed on a bare ESP32-C3 with no
+// CC1101 attached -- fan/light RF sends become no-ops instead of calling
+// into unconfigured/absent hardware, and the radio watchdog (which would
+// otherwise reboot forever over a known-missing chip) stays quiet.
+bool radioAvailable = false;
+
 // Fan speed is tracked so onAdjustRangeValue can compute a new absolute value.
 int fanSpeed = 0; // 0 = off, 1..3 = low/medium/high
 
@@ -281,6 +288,10 @@ void checkFactoryResetButton() {
 }
 
 void sendFanCode(int speed) {
+  if (!radioAvailable) {
+    logf("Radio not available, skipping fan RF send (speed %d)", speed);
+    return;
+  }
   switch (speed) {
     case 1: myRadio.send(RF_CODE_FAN_LOW, RF_BITLENGTH); break;
     case 2: myRadio.send(RF_CODE_FAN_MEDIUM, RF_BITLENGTH); break;
@@ -332,8 +343,12 @@ bool onLightPowerState(const String &deviceId, bool &state) {
   logf("Light requested: %s (currently tracked as %s)",
        state ? "ON" : "OFF", lightState ? "ON" : "OFF");
   if (state != lightState) {
-    myRadio.send(RF_CODE_LIGHT, RF_BITLENGTH);
-    ledBlinkStart();
+    if (radioAvailable) {
+      myRadio.send(RF_CODE_LIGHT, RF_BITLENGTH);
+      ledBlinkStart();
+    } else {
+      logf("Radio not available, skipping light RF send");
+    }
     lightState = state;
   }
   return true;
@@ -466,10 +481,13 @@ void setupRadio() {
   // any register read/write, including getCC1101().
   ELECHOUSE_cc1101.Init();
 
-  if (ELECHOUSE_cc1101.getCC1101()) {
+  radioAvailable = ELECHOUSE_cc1101.getCC1101();
+  if (radioAvailable) {
     logf("CC1101 Connection: SUCCESS");
   } else {
-    logf("CC1101 Connection: FAILED. Check your wiring!");
+    logf("CC1101 Connection: FAILED (no module attached, or check wiring) -- "
+         "fan/light RF commands will be no-ops; WiFi/SinricPro/portal still work");
+    return; // nothing to configure on a chip that isn't there
   }
 
   ELECHOUSE_cc1101.setMHZ(RF_MHZ);
@@ -545,6 +563,7 @@ void checkSinricWatchdog() {
 // failure mode where SinricPro/WiFi stay connected (Google still hears an
 // ack) but sendFanCode()/onLightPowerState() silently stop transmitting.
 void checkRadioWatchdog() {
+  if (!radioAvailable) return; // known-missing at boot -- don't reboot forever over it
   if (millis() - lastRadioCheck < RADIO_CHECK_INTERVAL_MS) return;
   lastRadioCheck = millis();
 
