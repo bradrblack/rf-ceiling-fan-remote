@@ -26,6 +26,15 @@
 #define C3_CC1101_CS    7
 #define C3_CC1101_GDO0  3
 
+// Onboard blue LED on most ESP32-C3 Super Mini boards -- active-low (LOW =
+// on). Blinks for LED_BLINK_MS every time an RF code is sent, as a visual
+// "yes, it's actually transmitting" check. If your board's LED is on a
+// different pin or wired active-high, adjust these two.
+#define LED_PIN         8
+#define LED_ON          LOW
+#define LED_OFF         HIGH
+#define LED_BLINK_MS    500
+
 #define RF_MHZ          304.25
 #define RF_PROTOCOL     11
 #define RF_PULSE_US     412
@@ -223,6 +232,26 @@ int fanSpeed = 0; // 0 = off, 1..3 = low/medium/high
 // can drift out of sync if the light is ever toggled by another remote.
 bool lightState = false;
 
+// Lights the onboard LED for LED_BLINK_MS as visual confirmation an RF
+// code was actually sent. Non-blocking: checkLedBlink() (called from
+// loop()) turns it back off once the interval elapses, rather than
+// stalling command processing/watchdogs with a blocking delay().
+bool ledOn = false;
+unsigned long ledOnSince = 0;
+
+void ledBlinkStart() {
+  digitalWrite(LED_PIN, LED_ON);
+  ledOn = true;
+  ledOnSince = millis();
+}
+
+void checkLedBlink() {
+  if (ledOn && millis() - ledOnSince >= LED_BLINK_MS) {
+    digitalWrite(LED_PIN, LED_OFF);
+    ledOn = false;
+  }
+}
+
 void sendFanCode(int speed) {
   switch (speed) {
     case 1: myRadio.send(RF_CODE_FAN_LOW, RF_BITLENGTH); break;
@@ -230,6 +259,7 @@ void sendFanCode(int speed) {
     case 3: myRadio.send(RF_CODE_FAN_HIGH, RF_BITLENGTH); break;
     default: myRadio.send(RF_CODE_FAN_OFF, RF_BITLENGTH); break;
   }
+  ledBlinkStart();
 }
 
 // ==========================================
@@ -275,6 +305,7 @@ bool onLightPowerState(const String &deviceId, bool &state) {
        state ? "ON" : "OFF", lightState ? "ON" : "OFF");
   if (state != lightState) {
     myRadio.send(RF_CODE_LIGHT, RF_BITLENGTH);
+    ledBlinkStart();
     lightState = state;
   }
   return true;
@@ -285,6 +316,9 @@ bool onLightPowerState(const String &deviceId, bool &state) {
 // ==========================================
 
 void setupRadio() {
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LED_OFF);
+
   ELECHOUSE_cc1101.setSpiPin(C3_CC1101_CLK, C3_CC1101_MISO, C3_CC1101_MOSI, C3_CC1101_CS);
 
   // Init() brings up SPI.begin() on the custom pins, so it must run before
@@ -498,4 +532,5 @@ void loop() {
   checkRadioWatchdog();
   checkClockJump();
   checkDailyReboot();
+  checkLedBlink();
 }
