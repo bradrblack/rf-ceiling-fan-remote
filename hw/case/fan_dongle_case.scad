@@ -158,12 +158,15 @@ module lid() {
           translate([wall_t, wall_t, -0.5])
             cube([skirt_w - 2 * wall_t, skirt_h_ - 2 * wall_t, lip_h + 1]);
         }
-      // outer wall enclosing the component-clearance cavity, Z 0..component_clearance
-      difference() {
-        cube([outer_w, outer_h, component_clearance]);
-        translate([wall_t, wall_t, -0.5])
-          cube([cavity_w, cavity_h, component_clearance + 1]);
-      }
+      // outer wall enclosing the component-clearance cavity. Sits ON TOP of
+      // the bottom shell's wall rim (same outer_w/outer_h footprint, flush),
+      // starting above the skirt rather than overlapping it -- Z lip_h..component_clearance.
+      translate([0, 0, lip_h])
+        difference() {
+          cube([outer_w, outer_h, component_clearance - lip_h]);
+          translate([wall_t, wall_t, -0.5])
+            cube([cavity_w, cavity_h, component_clearance - lip_h + 1]);
+        }
       // top panel, closes off the top
       translate([0, 0, component_clearance])
         cube([outer_w, outer_h, wall_t]);
