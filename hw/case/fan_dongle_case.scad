@@ -49,17 +49,25 @@ usb_hole_d = 6;
 usb_hole_y = 12;      // centered on board Y (= ESP32 module Y-center)
 usb_hole_z = 6;        // height above case floor -- guess, verify against your module
 
-// Reset-button poke-hole tunnel: BOOT button position on a typical Super
-// Mini is clustered near the USB-C edge. This is a rough estimate of
-// where that lands once the module is soldered onto THIS board -- check
-// against your actual module and adjust before printing.
-button_hole_d = 2.5;   // fits a toothpick/paperclip/pin
+// Reset-button poke-hole tunnel: button is top-mounted (pressed straight
+// down), not on a side edge -- vertical hole through the lid, not the
+// wall. Position is a rough estimate (typical Super Minis cluster it near
+// the USB-C edge) -- check against your actual module and adjust before
+// printing.
+button_hole_d = 3;      // fits a toothpick/paperclip/pin
 button_hole_x = 8;      // local X, near the left/USB edge
 button_hole_y = 4;      // local Y, offset from center toward one side
 
 // External LED, mounted on the lid top, wired in parallel to the onboard
 // LED (GPIO8/GND) with its own leads -- no firmware change needed.
 led_hole_d = 5;          // standard 5mm through-hole LED
+
+// Ventilation: small dot grid across the lid top, skipped near the LED
+// and button holes so nothing merges awkwardly close together.
+vent_hole_d = 2;
+vent_spacing = 6;      // grid pitch
+vent_margin = 8;       // keep dots this far from the lid's outer edge
+vent_exclude_r = 6;    // skip any dot this close to the LED/button holes
 
 // ==========================================
 // Case construction parameters
@@ -121,12 +129,17 @@ module bottom_shell() {
     translate([-0.5, board_origin[1] + usb_hole_y, floor_t + usb_hole_z])
       rotate([0, 90, 0])
         cylinder(d = usb_hole_d, h = wall_t + 1);
-
-    // Reset button poke-hole tunnel, front wall (Y=0 side)
-    translate([board_origin[0] + button_hole_x, -0.5, floor_t + standoff_h + board_t / 2])
-      rotate([-90, 0, 0])
-        cylinder(d = button_hole_d, h = wall_t + 1);
   }
+}
+
+module vent_holes() {
+  led_pos = [outer_w / 2, outer_h / 2];
+  btn_pos = [board_origin[0] + button_hole_x, board_origin[1] + button_hole_y];
+  for (x = [vent_margin : vent_spacing : outer_w - vent_margin])
+    for (y = [vent_margin : vent_spacing : outer_h - vent_margin])
+      if (norm([x, y] - led_pos) > vent_exclude_r && norm([x, y] - btn_pos) > vent_exclude_r)
+        translate([x, y, component_clearance - 0.5])
+          cylinder(d = vent_hole_d, h = wall_t + 1);
 }
 
 // Built upright in its own natural print orientation: skirt at the bottom
@@ -152,6 +165,13 @@ module lid() {
     // external LED hole, centered on lid top
     translate([outer_w / 2, outer_h / 2, component_clearance - 0.5])
       cylinder(d = led_hole_d, h = wall_t + 1);
+
+    // reset button poke-hole tunnel, straight down through the lid top
+    translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, component_clearance - 0.5])
+      cylinder(d = button_hole_d, h = wall_t + 1);
+
+    // ventilation dot grid
+    vent_holes();
   }
 }
 
