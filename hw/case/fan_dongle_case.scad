@@ -56,7 +56,7 @@ usb_hole_z = 6;        // height above case floor -- guess, verify against your 
 // printing.
 button_hole_d = 3;      // fits a toothpick/paperclip/pin
 button_hole_x = 8;      // local X, near the left/USB edge
-button_hole_y = 4;      // local Y, offset from center toward one side
+button_hole_y = 20;     // local Y -- left side when facing the USB port
 
 // External LED, mounted on the lid top, wired in parallel to the onboard
 // LED (GPIO8/GND) with its own leads -- no firmware change needed.
