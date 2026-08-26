@@ -149,9 +149,15 @@ module lid() {
   skirt_h_ = cavity_h - 2 * fit_clearance;
   difference() {
     union() {
-      // skirt: friction-fits inside the bottom shell's lip zone, Z 0..lip_h
+      // skirt: friction-fits inside the bottom shell's lip zone, Z 0..lip_h.
+      // A thin ring, not a filled slab -- must stay hollow in the middle or
+      // it becomes a solid floor under the component cavity.
       translate([wall_t + fit_clearance, wall_t + fit_clearance, 0])
-        cube([skirt_w, skirt_h_, lip_h]);
+        difference() {
+          cube([skirt_w, skirt_h_, lip_h]);
+          translate([wall_t, wall_t, -0.5])
+            cube([skirt_w - 2 * wall_t, skirt_h_ - 2 * wall_t, lip_h + 1]);
+        }
       // outer wall enclosing the component-clearance cavity, Z 0..component_clearance
       difference() {
         cube([outer_w, outer_h, component_clearance]);
