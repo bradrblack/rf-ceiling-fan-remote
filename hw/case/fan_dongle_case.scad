@@ -20,17 +20,25 @@
 // straight back up, and a slotted/keyed hook can't either without either
 // colliding with the pin during any sideways lock motion or requiring a
 // wider-headed pin than this design uses (the geometry was checked both
-// ways). What actually keeps the case shut is a snap-fit latch: one
-// flexible cantilever tab per long wall, engaging a ramped catch ridge on
-// the tray wall as the top drops down (a locking screw was tried first,
-// but the CC1101's antenna coils well past the board's far edge, right
-// where the screw boss needed to sit). Everything else here is fit and
-// alignment, not a lock. The tray's open (cable) end has a short fixed
-// stub wall covering its bottom third; the top's leading wall picks up
-// right where that stops and covers the rest, closing off the whole
-// opening between them except for a recessed USB-C port opening. Both
-// the top's outer edge and the tray's long walls carry a matching
-// cosmetic rounded fillet (not a chamfer) where they meet.
+// ways). What actually keeps the case shut is a snap-fit latch: two
+// flexible cantilever tabs per long wall (four total, spread toward each
+// end rather than one centered pair, so both ends of the ceiling panel
+// get held down instead of just the middle), each engaging a ramped catch
+// ridge on the tray wall as the top drops down (a locking screw was tried
+// first, but the CC1101's antenna coils well past the board's far edge,
+// right where the screw boss needed to sit). Everything else here is fit
+// and alignment, not a lock. The tray's open (cable) end has a short
+// fixed stub wall covering its bottom third; the top's leading wall picks
+// up right where that stops and covers the rest, closing off the whole
+// opening between them except for a recessed USB-C port opening.
+// Exterior edges carry a cosmetic rounded fillet (not a chamfer): the
+// ceiling's top edge and corners, the tray floor's bottom edge and
+// corners, and the top-outer edge of all 3 tray walls that stay exposed
+// once assembled (the near stub wall's top edge sits under the top's
+// leading wall and is never actually visible, so it's left square). The
+// vertical corner edges, where walls meet each other, are NOT rounded --
+// a much bigger job for this CSG-built model than the horizontal edges,
+// and not attempted yet.
 //
 // Render in OpenSCAD, or from the command line:
 //   openscad -o tray.stl   -D 'part="tray"' fan_dongle_case.scad
@@ -148,15 +156,19 @@ end_wall_frac = 1 / 3;
 far_end_extra = 10;
 
 // Snap-fit latch: what actually keeps the case shut, now that a screw in
-// the far-end gap isn't an option. One flexible cantilever tab per long
-// wall, centered along the board's length, engaging a ramped ridge on the
-// tray wall -- ramped on the entry (bottom) side for a smooth push as the
-// top drops down, flat on the catch (top) side so pulling the top back
-// off requires deliberately flexing the tab back out. UNVALIDATED --
-// first pass, needs a test print to confirm the tab actually flexes
-// without snapping in your printed material (PLA especially is brittle;
-// may need a wider/thicker tab, or a more flexible filament, to survive
-// repeated opening).
+// the far-end gap isn't an option. TWO flexible cantilever tabs per long
+// wall (four total) -- spread toward each end of the board rather than
+// one centered tab, so both ends of the ceiling get held down instead of
+// just the middle (a single centered tab left the near/far ends of the
+// panel with nothing catching them, free to flex or lift even with the
+// middle snapped shut). Each tab engages a ramped ridge on the tray
+// wall -- ramped on the entry (bottom) side for a smooth push as the top
+// drops down, flat on the catch (top) side so pulling the top back off
+// requires deliberately flexing the tab back out. UNVALIDATED -- first
+// pass, needs a test print to confirm the tabs actually flex without
+// snapping in your printed material (PLA especially is brittle; may need
+// wider/thicker tabs, or a more flexible filament, to survive repeated
+// opening).
 snap_tab_w = 8;               // tab width
 snap_tab_thickness = 1;       // tab thickness (thinner than wall_t, for flex)
 snap_bump_protrusion = 0.6;  // how far the catch bump sticks out
@@ -191,10 +203,11 @@ board_origin = [wall_t + board_margin, wall_t + board_margin];
 
 function b2c(p) = [p[0] + board_origin[0], p[1] + board_origin[1]];
 
-// snap-fit tab/ridge position: centered along the board's length, and
-// vertically centered in the skirt's engagement zone (same spot the old
-// rail used to sit)
-snap_x = board_origin[0] + board_w / 2;
+// snap-fit tab/ridge X positions: spread toward each end of the board
+// (20%/80% along its length) rather than one centered point, clear of the
+// hook washers at the board's corners. Z is centered in the skirt's
+// engagement zone (same spot the old rail used to sit).
+snap_x_list = [board_origin[0] + board_w * 0.2, board_origin[0] + board_w * 0.8];
 snap_z_lo = skirt_bot_z + (ceiling_bot_z - skirt_bot_z) / 2 - snap_engage_h / 2;
 
 // Rounded fillet to match the top's, applied to the top outer edge of the
@@ -225,25 +238,61 @@ module rounded_wall_high(length, thickness, height, r) {
         cylinder(r = r, h = length, $fn = 24);
   }
 }
+// Same idea, but for a wall running along Y (exterior face at local
+// X=thickness, larger X) -- used for the tray's far end wall.
+module rounded_wall_x_high(length_y, thickness, height, r) {
+  union() {
+    cube([thickness, length_y, height - r]);
+    translate([0, 0, height - r])
+      cube([thickness - r, length_y, r]);
+    translate([thickness - r, 0, height - r])
+      rotate([-90, 0, 0])
+        cylinder(r = r, h = length_y, $fn = 24);
+  }
+}
 
-// Snap-fit catch ridges, wedge-shaped: full snap_bump_protrusion at the
+// Flat-bottomed box with a rounded fillet around its BOTTOM outer edge
+// (all 4 sides, including corners) -- same minkowski-dome technique as
+// rounded_top(), just mirrored to round the bottom instead of the top.
+// Used for the tray floor, so the case doesn't have a sharp edge where it
+// sits on a table either.
+module rounded_bottom(w, h, t, r) {
+  union() {
+    translate([0, 0, r])
+      linear_extrude(t - r)
+        square([w, h]);
+    intersection() {
+      translate([0, 0, r])
+        minkowski() {
+          translate([r, r, 0])
+            linear_extrude(0.02)
+              square([w - 2 * r, h - 2 * r]);
+          sphere(r = r, $fn = 24);
+        }
+      translate([-1, -1, -1])
+        cube([w + 2, h + 2, r + 1]);
+    }
+  }
+}
+
+// Snap-fit catch ridge, wedge-shaped: full snap_bump_protrusion at the
 // bottom (snap_z_lo), tapering to ~flush at the top (snap_z_lo +
 // snap_engage_h). A tab sliding down past this ramps outward gradually
 // (easy); pulling back up hits the flat, full-width bottom face
 // immediately (hard) -- that asymmetry is what makes it a catch and not
-// just a bump.
-module snap_ridge_low() {
+// just a bump. Called once per position in snap_x_list.
+module snap_ridge_low(x) {
   // attaches to the low wall's inner face (Y=wall_t), protrudes toward +Y
-  translate([snap_x - snap_tab_w / 2 - 1, wall_t, snap_z_lo])
+  translate([x - snap_tab_w / 2 - 1, wall_t, snap_z_lo])
     hull() {
       cube([snap_tab_w + 2, snap_bump_protrusion, 0.1]);
       translate([0, 0, snap_engage_h])
         cube([snap_tab_w + 2, 0.1, 0.1]);
     }
 }
-module snap_ridge_high() {
+module snap_ridge_high(x) {
   // attaches to the high wall's inner face (Y=outer_h-wall_t), protrudes toward -Y
-  translate([snap_x - snap_tab_w / 2 - 1, outer_h - wall_t - snap_bump_protrusion, snap_z_lo])
+  translate([x - snap_tab_w / 2 - 1, outer_h - wall_t - snap_bump_protrusion, snap_z_lo])
     hull() {
       cube([snap_tab_w + 2, snap_bump_protrusion, 0.1]);
       translate([0, snap_bump_protrusion - 0.1, snap_engage_h])
@@ -265,26 +314,31 @@ module mount_hole_positions() {
 // once dropped into place, and the cable exits through the gap either way.
 module bottom_tray() {
   union() {
-    // floor
-    cube([outer_w, outer_h, floor_t]);
+    // floor, with a rounded fillet around its bottom outer edge too --
+    // no sharp edge where the case sits on a table
+    rounded_bottom(outer_w, outer_h, floor_t, top_fillet);
     // long side walls, full tray height, spanning the whole length --
     // rounded fillet to match the top's, on the exterior-facing side only
     translate([0, 0, floor_t])
       rounded_wall_low(outer_w, wall_t, tray_wall_h, top_fillet);
     translate([0, outer_h - wall_t, floor_t])
       rounded_wall_high(outer_w, wall_t, tray_wall_h, top_fillet);
-    // closed far-end wall
+    // closed far-end wall, same rounded top edge as the long walls
     translate([outer_w - wall_t, 0, floor_t])
-      cube([wall_t, outer_h, tray_wall_h]);
+      rounded_wall_x_high(outer_h, wall_t, tray_wall_h, top_fillet);
     // near-end stub wall -- closes the bottom end_wall_frac of the open
     // (cable) end. The top's leading wall picks up right where this
-    // stops (see top_slide()), so the two seal the opening together.
+    // stops (see top_slide()), so the two seal the opening together. No
+    // rounding here -- its top edge is an internal seam under the top's
+    // leading wall once assembled, never actually exposed.
     translate([0, 0, floor_t])
       cube([wall_t, outer_h, end_wall_top_z - floor_t]);
-    // snap-fit catch ridges, one per long wall (snap_z_lo is already an
+    // snap-fit catch ridges, two per long wall (snap_z_lo is already an
     // absolute Z, no extra offset needed)
-    snap_ridge_low();
-    snap_ridge_high();
+    for (x = snap_x_list) {
+      snap_ridge_low(x);
+      snap_ridge_high(x);
+    }
     // 4 mounting pads with alignment pins on top
     mount_hole_positions()
       union() {
@@ -394,21 +448,24 @@ module top_slide() {
       translate([0, 0, ceiling_bot_z])
         rounded_top(outer_w, outer_h, wall_t, top_fillet);
       // skirt walls, nested just inside the tray's long walls, each thinned
-      // down to a flexible snap-fit tab at snap_x -- the matching ridge on
-      // the tray wall protrudes past this tab's resting face, so the ridge
-      // alone (already ramped/flat, see snap_ridge_low/high) creates the
-      // catch interference without needing a separate bump here
+      // down to a flexible snap-fit tab at every position in snap_x_list --
+      // the matching ridge on the tray wall protrudes past each tab's
+      // resting face, so the ridge alone (already ramped/flat, see
+      // snap_ridge_low/high) creates the catch interference without
+      // needing a separate bump here
       difference() {
         translate([0, wall_t + fit_clearance, skirt_bot_z])
           cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
-        translate([snap_x - snap_tab_w / 2, wall_t + fit_clearance + snap_tab_thickness, skirt_bot_z - 0.5])
-          cube([snap_tab_w, wall_t - snap_tab_thickness + 0.5, ceiling_bot_z - skirt_bot_z + 1]);
+        for (x = snap_x_list)
+          translate([x - snap_tab_w / 2, wall_t + fit_clearance + snap_tab_thickness, skirt_bot_z - 0.5])
+            cube([snap_tab_w, wall_t - snap_tab_thickness + 0.5, ceiling_bot_z - skirt_bot_z + 1]);
       }
       difference() {
         translate([0, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z])
           cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
-        translate([snap_x - snap_tab_w / 2, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z - 0.5])
-          cube([snap_tab_w, wall_t - snap_tab_thickness + 0.5, ceiling_bot_z - skirt_bot_z + 1]);
+        for (x = snap_x_list)
+          translate([x - snap_tab_w / 2, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z - 0.5])
+            cube([snap_tab_w, wall_t - snap_tab_thickness + 0.5, ceiling_bot_z - skirt_bot_z + 1]);
       }
       // leading-edge wall: picks up exactly where the tray's fixed stub
       // wall stops (end_wall_top_z) and covers up to the ceiling's own
