@@ -16,9 +16,11 @@
 // still removable by sliding the top back out. A rail along each of the
 // tray's long walls engages a matching groove in the top's skirts, so the
 // top itself can't be lifted straight off the tray either -- it only
-// comes off by sliding back out the way it went in. The top's leading
-// edge is a full wall reaching down to the tray floor, closing off the
-// whole open end except for a small round cable port.
+// comes off by sliding back out the way it went in. The tray's open
+// (cable) end has a short fixed stub wall covering its bottom third; the
+// top's leading wall picks up right where that stops and covers the
+// rest, closing off the whole opening between them except for a slot
+// sized to the cable itself.
 //
 // Render in OpenSCAD, or from the command line:
 //   openscad -o tray.stl   -D 'part="tray"' fan_dongle_case.scad
@@ -54,12 +56,12 @@ cc1101_outline = [16, 19];
 // header-stack height. Increase if your modules are taller than this.
 component_clearance = 8;
 
-// USB-C cable: modules face the board's short left edge (X=0). The tray's
-// near end has no wall (so the top piece can slide in from there), but the
-// top piece's own leading edge carries a small end wall with just a round
-// port for the cable -- closes off the rest of that opening once the top
-// is fully slid home.
-usb_hole_d = 6;                // cable port diameter
+// USB-C cable: modules face the board's short left edge (X=0). The
+// tray's near end carries a short stub wall (see end_wall_frac below);
+// above that, the top piece's own leading edge closes the rest of the
+// opening except for a slot sized to the cable itself, not a connector.
+usb_hole_d = 4;                // cable slot width -- just the cable's own
+                                 // diameter, not a connector -- guess, verify
 usb_hole_y = 12;               // centered on board Y (= ESP32 module Y-center)
 usb_hole_z_above_board = 3.7; // port center height above the board's top surface -- guess, verify
                                 // (kept off usb_hole_d/2 exactly -- that coincidence put the
@@ -110,6 +112,14 @@ rail_protrusion = 0.8;   // how far the rail sticks in from the tray wall's inne
 rail_h = 1.5;               // rail height (vertical)
 rail_clearance = 0.3;      // clearance around the rail inside the groove
 
+// Near-end stub wall: the tray's near (cable) end is open so the top can
+// slide in, but a short fixed wall up to end_wall_frac of the tray's
+// height closes off the bottom part on the tray side itself. The top's
+// leading wall picks up from exactly where this stops and covers the
+// rest, so together they seal the whole opening (minus the cable slot)
+// once assembled -- rather than the top being the only thing closing it.
+end_wall_frac = 1 / 3;
+
 // ==========================================
 // Case construction parameters
 // ==========================================
@@ -133,6 +143,7 @@ rail_z_lo = skirt_bot_z + (ceiling_bot_z - skirt_bot_z) / 2 - rail_h / 2; // rai
                                                                             // in the skirt engagement zone
 button_tube_od = button_hole_d + 2 * button_tube_wall;
 button_tube_bot_z = skirt_bot_z + button_tube_gap_above_board;
+end_wall_top_z = floor_t + tray_wall_h * end_wall_frac;
 
 // Board-local -> case-local (board sits centered in the cavity, offset by
 // wall_t + board_margin from the case's own bottom-left corner)
@@ -163,6 +174,13 @@ module bottom_tray() {
     // closed far-end wall -- the slide's hard stop
     translate([outer_w - wall_t, 0, floor_t])
       cube([wall_t, outer_h, tray_wall_h]);
+    // near-end stub wall -- fixed, doesn't slide, closes the bottom
+    // end_wall_frac of the open (cable) end. The top's leading wall picks
+    // up right where this stops (see top_slide()), so the two don't
+    // occupy the same space -- the top would have nowhere to slide into
+    // if this reached as high as the top's own leading wall does.
+    translate([0, 0, floor_t])
+      cube([wall_t, outer_h, end_wall_top_z - floor_t]);
     // retention rails, full length, engaging the top's skirt grooves so
     // the top can't be lifted straight up once slid into place
     translate([0, wall_t, rail_z_lo])
@@ -226,10 +244,13 @@ module top_slide() {
         cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
       translate([0, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z])
         cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
-      // leading-edge wall: down to the tray floor, closing the whole open
-      // end once slid home except for the cable port cut below
-      translate([0, 0, floor_t])
-        cube([wall_t, outer_h, ceiling_top_z - floor_t]);
+      // leading-edge wall: picks up exactly where the tray's fixed stub
+      // wall stops (end_wall_top_z) and covers the rest up to the
+      // ceiling -- can't reach all the way to the floor itself, since
+      // that space is occupied by the tray's own stub wall, fixed and
+      // already in the way of any lower reach as the top slides in
+      translate([0, 0, end_wall_top_z])
+        cube([wall_t, outer_h, ceiling_top_z - end_wall_top_z]);
       // retention hooks, one per mounting pin
       mount_hole_positions()
         hook_post(hook_bot_z, ceiling_top_z);
@@ -243,15 +264,16 @@ module top_slide() {
       cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
     // ventilation dot grid
     vent_holes(ceiling_bot_z);
-    // cable slot through the leading-edge wall, open at the wall's bottom
-    // edge -- a fully closed hole would mean threading the whole cable
+    // cable slot through the leading-edge wall, open at the wall's own
+    // bottom edge (end_wall_top_z, where the tray's stub wall stops) --
+    // a fully closed hole would mean threading the whole cable
     // (including whatever's on its far end) through before the top could
     // even start sliding on. This way the cable gets plugged into the
     // board first, then the top slides into place around it. Straight
-    // sides down to the floor, rounded off at the top where the cable
-    // actually rests.
-    translate([-0.5, board_origin[1] + usb_hole_y - usb_hole_d / 2, floor_t])
-      cube([wall_t + 1, usb_hole_d, (skirt_bot_z + usb_hole_z_above_board) - floor_t]);
+    // sides down to the wall's bottom, rounded off at the top where the
+    // cable actually rests.
+    translate([-0.5, board_origin[1] + usb_hole_y - usb_hole_d / 2, end_wall_top_z])
+      cube([wall_t + 1, usb_hole_d, (skirt_bot_z + usb_hole_z_above_board) - end_wall_top_z]);
     translate([-0.5, board_origin[1] + usb_hole_y, skirt_bot_z + usb_hole_z_above_board])
       rotate([0, 90, 0])
         cylinder(d = usb_hole_d, h = wall_t + 1);
