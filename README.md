@@ -48,17 +48,23 @@ pio run -e c3_mini_fan -t upload
 
 ## This fan's captured RF codes
 
-Captured with `sniff.ino` — protocol 11, 12-bit, ~412µs pulse length:
+Captured with `sniff.ino` — protocol 11, 12-bit, ~412µs pulse length.
 
-| Button | Decimal code |
+This remote's codes encode two things in the same 12-bit value: which button was pressed, and the remote's 4-position **DIP switch** address (under the battery cover) — so a fan only responds to a remote configured with the same switch positions, and multiple fans can share the same frequency/protocol without answering each other's remote. Sniffing the same 5 buttons across 3 different switch combinations showed the low 4 bits are exactly the DIP address (switch 1 → bit 3 down to switch 4 → bit 0, **OFF = 1, ON = 0**) and the upper 8 bits are the button, unaffected by the switches:
+
+| Button | Base code (all switches ON) |
 |---|---|
-| Fan low | 2044 |
-| Fan medium | 3836 |
-| Fan high | 3964 |
-| Fan off | 4028 |
-| Light toggle | 3068 |
+| Fan low | 2032 |
+| Fan medium | 3824 |
+| Fan high | 3952 |
+| Fan off | 4016 |
+| Light toggle | 3056 |
 
-If you're cloning this for a different remote, re-run `sniff.ino` and update the codes/protocol/pulse length in `src/fan_control/fan_control.cpp`.
+A fan's actual codes are `base | address_nibble`. This fan's remote is set to 1=off, 2=off, 3=on, 4=on (address nibble `1100` = 12), giving 2044/3836/3964/4028/3068 — the codes this project originally shipped with, before the DIP addressing was understood.
+
+The firmware computes the real codes at boot from the base table above plus the configured switch positions (`DIP_SWITCH_1..4` in `secrets.h`, or the portal fields for `c3_mini_fan_public`) — you don't need to sniff a separate code set per fan, just tell it the switch positions.
+
+If you're cloning this for a different remote, re-run `sniff.ino` with all DIP switches ON to capture a fresh base table, and update `RF_CODE_*_BASE`/protocol/pulse length in `src/fan_control/fan_control.cpp` (and `fan_control_public.cpp`).
 
 ## Setup
 
@@ -67,7 +73,7 @@ If you're cloning this for a different remote, re-run `sniff.ino` and update the
    - A **Fan (US)** device — supports the 3-speed range this fan uses
    - A **Switch** device — for the light toggle
    (Free tier allows up to 3 devices.)
-3. **Fill in credentials** — copy `src/fan_control/secrets.h.example` to `src/fan_control/secrets.h` (gitignored) and fill in your WiFi SSID/password, SinricPro App Key/Secret, and both device IDs.
+3. **Fill in credentials** — copy `src/fan_control/secrets.h.example` to `src/fan_control/secrets.h` (gitignored) and fill in your WiFi SSID/password, SinricPro App Key/Secret, both device IDs, and your remote's DIP switch positions (`DIP_SWITCH_1..4` — see [This fan's captured RF codes](#this-fans-captured-rf-codes) above).
 4. **Flash the production firmware**: `pio run -e c3_mini_fan -t upload`
 5. **Link SinricPro to Google Home** from the Google Home app (Works with Google / SinricPro integration) — the fan and light will show up as native devices, controllable by voice with no fixed phrase list.
 
@@ -75,14 +81,14 @@ If you're cloning this for a different remote, re-run `sniff.ino` and update the
 
 `c3_mini_fan` (above) compiles your WiFi and SinricPro credentials in from `secrets.h`, which is convenient for one device you control but means sharing it with someone else requires them to edit and rebuild the source. `c3_mini_fan_public` (`src/fan_control_public/`) is the same firmware — same CC1101 wiring, same RF codes/watchdogs/reliability behavior — but collects WiFi and SinricPro credentials at first boot through a [WiFiManager](https://github.com/tzapu/WiFiManager) captive portal instead, so someone with the **same fan/remote hardware** can flash it and configure it themselves without touching any code.
 
-This only replaces the WiFi/SinricPro *credentials* — the RF codes, CC1101 pins, and RF frequency/protocol are still compile-time constants in the source, since those are specific to this exact fan/remote model. It's for sharing the same physical build, not a general-purpose RF-cloning tool.
+This replaces the WiFi/SinricPro *credentials* and the remote's *DIP switch address* with portal fields — the base RF codes, CC1101 pins, and RF frequency/protocol are still compile-time constants in the source, since those are specific to this exact fan/remote model. It's for sharing the same physical build (same remote model, possibly a different individual fan/DIP address), not a general-purpose RF-cloning tool.
 
 Setup, for the person flashing it:
 
 1. **Flash it**: `pio run -e c3_mini_fan_public -t upload` (no `secrets.h` needed for this target).
 2. **Connect to the setup network** — on first boot (or whenever it can't connect to a previously saved WiFi network), it opens a WiFi access point named `FanControllerSetup`. Connect to it from a phone or laptop.
-3. **Fill in the portal** — a captive portal page should open automatically (or navigate to `192.168.4.1`); choose your home WiFi network and enter its password, plus your own SinricPro App Key, App Secret, Fan device ID, and Light device ID (from your own SinricPro account — see [Setup](#setup) above for creating those devices), and optionally a device hostname (defaults to `myfan`, see below).
-4. Submit — the device saves those to flash, connects to your WiFi, and starts talking to SinricPro. If it ever fails to connect (e.g. moved to a new network), it automatically reopens the `FanControllerSetup` portal.
+3. **Fill in the portal** — a captive portal page should open automatically (or navigate to `192.168.4.1`); choose your home WiFi network and enter its password, plus your own SinricPro App Key, App Secret, Fan device ID, and Light device ID (from your own SinricPro account — see [Setup](#setup) above for creating those devices), your remote's 4 DIP switch positions (`on`/`off` each, matching the physical sliders under the battery cover), and optionally a device hostname (defaults to `myfan`, see below).
+4. Submit — the device saves those to flash, computes its RF codes from the DIP positions, connects to your WiFi, and starts talking to SinricPro. If it ever fails to connect (e.g. moved to a new network), it automatically reopens the `FanControllerSetup` portal (DIP/SinricPro fields stay saved).
 
 Unlike `c3_mini_fan`, this build has no ntfy.sh push notifications — reboot reasons are still logged to serial for anyone debugging, just not pushed anywhere, to keep the shared build simpler and dependency-free for other users.
 
@@ -95,7 +101,7 @@ The device is reachable on the local network at `http://<hostname>.local` (defau
 
 ### Multiple fan units
 
-If you have more than one of these controllers on the same network (e.g. the remote's DIP switch supports multiple fans with different RF codes per unit), give each one a distinct hostname in the setup portal so they don't collide on the network — `myfan`, `myfan2`, etc.
+The remote's DIP switches address multiple physically distinct fans on the same frequency/protocol — each fan only responds to a remote (or this controller) configured with its matching switch positions. If you have more than one of these controllers on the same network, give each a distinct hostname in the setup portal (`myfan`, `myfan2`, etc.) *and* set its own DIP fields to match the specific fan it's paired with.
 
 ## Known limitation
 

@@ -18,7 +18,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-25r5"
+#define FIRMWARE_VERSION "2026-08-27r1"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -70,14 +70,29 @@ R"(  __  __         _____
 #define RF_PULSE_US     412
 #define RF_BITLENGTH    12
 
-// Codes captured with sniff.ino -- these are specific to this fan/remote
-// model. If you're cloning this for a different remote, re-run sniff.ino
-// and update these.
-#define RF_CODE_FAN_LOW    2044
-#define RF_CODE_FAN_MEDIUM 3836
-#define RF_CODE_FAN_HIGH   3964
-#define RF_CODE_FAN_OFF    4028
-#define RF_CODE_LIGHT      3068
+// Base codes captured with sniff.ino, with all 4 DIP switches ON (address
+// nibble 0000) -- specific to this fan/remote model. If you're cloning this
+// for a different remote, re-run sniff.ino with all switches ON and update
+// these. This remote encodes its DIP switch address as the low 4 bits of
+// the 12-bit code, OFF=1/ON=0 per switch (switch 1 = bit 3 down to switch 4
+// = bit 0) -- confirmed by sniffing the same 5 buttons across 3 different
+// switch combinations and finding only that nibble changes. The actual
+// per-fan codes are computed once the portal's DIP switch fields are known
+// (see computeRfCodes()), by OR-ing this base with the address nibble.
+#define RF_CODE_FAN_LOW_BASE    2032
+#define RF_CODE_FAN_MEDIUM_BASE 3824
+#define RF_CODE_FAN_HIGH_BASE   3952
+#define RF_CODE_FAN_OFF_BASE    4016
+#define RF_CODE_LIGHT_BASE      3056
+
+// Address nibble encoded by the remote's DIP switches: each switch
+// contributes one bit (1->bit3 .. 4->bit0), OFF = 1, ON = 0. OR'd with the
+// base codes above to get this fan's actual RF codes.
+uint8_t dipAddressNibble(bool sw1On, bool sw2On, bool sw3On, bool sw4On) {
+  return (sw1On ? 0 : 8) | (sw2On ? 0 : 4) | (sw3On ? 0 : 2) | (sw4On ? 0 : 1);
+}
+
+uint16_t rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight;
 
 // ==========================================
 // Reliability: WiFi + SinricPro + radio watchdogs, daily reboot
@@ -314,10 +329,10 @@ void sendFanCode(int speed) {
     return;
   }
   switch (speed) {
-    case 1: myRadio.send(RF_CODE_FAN_LOW, RF_BITLENGTH); break;
-    case 2: myRadio.send(RF_CODE_FAN_MEDIUM, RF_BITLENGTH); break;
-    case 3: myRadio.send(RF_CODE_FAN_HIGH, RF_BITLENGTH); break;
-    default: myRadio.send(RF_CODE_FAN_OFF, RF_BITLENGTH); break;
+    case 1: myRadio.send(rfCodeFanLow, RF_BITLENGTH); break;
+    case 2: myRadio.send(rfCodeFanMedium, RF_BITLENGTH); break;
+    case 3: myRadio.send(rfCodeFanHigh, RF_BITLENGTH); break;
+    default: myRadio.send(rfCodeFanOff, RF_BITLENGTH); break;
   }
   ledBlinkStart();
 }
@@ -365,7 +380,7 @@ bool onLightPowerState(const String &deviceId, bool &state) {
        state ? "ON" : "OFF", lightState ? "ON" : "OFF");
   if (state != lightState) {
     if (radioAvailable) {
-      myRadio.send(RF_CODE_LIGHT, RF_BITLENGTH);
+      myRadio.send(rfCodeLight, RF_BITLENGTH);
       ledBlinkStart();
     } else {
       logf("Radio not available, skipping light RF send");
@@ -397,6 +412,15 @@ char lightId[36] = "";
 // since WiFi.setHostname() has to run before autoConnect() -- i.e. before
 // this field's new value is even readable.
 char hostname[32] = DEFAULT_HOSTNAME;
+// This fan's remote's DIP switch positions, as typed into the portal ("on"
+// or "off", case-insensitive -- anything else is treated as "off"). Needed
+// because different physical fans on the same remote/protocol are only
+// distinguished by this address -- get it wrong and commands go to the
+// wrong fan. See RF_CODE_*_BASE and dipAddressNibble() above.
+char dip1[8] = "off";
+char dip2[8] = "off";
+char dip3[8] = "off";
+char dip4[8] = "off";
 
 bool shouldSaveSinricConfig = false;
 void onSaveSinricConfig() { shouldSaveSinricConfig = true; }
@@ -408,6 +432,10 @@ void loadSinricConfig() {
   prefs.getString("fan_id", fanId, sizeof(fanId));
   prefs.getString("light_id", lightId, sizeof(lightId));
   prefs.getString("hostname", hostname, sizeof(hostname));
+  prefs.getString("dip1", dip1, sizeof(dip1));
+  prefs.getString("dip2", dip2, sizeof(dip2));
+  prefs.getString("dip3", dip3, sizeof(dip3));
+  prefs.getString("dip4", dip4, sizeof(dip4));
   prefs.end();
 }
 
@@ -418,7 +446,31 @@ void saveSinricConfig() {
   prefs.putString("fan_id", fanId);
   prefs.putString("light_id", lightId);
   prefs.putString("hostname", hostname);
+  prefs.putString("dip1", dip1);
+  prefs.putString("dip2", dip2);
+  prefs.putString("dip3", dip3);
+  prefs.putString("dip4", dip4);
   prefs.end();
+}
+
+// "on"/"1"/"true" (case-insensitive) -> true, anything else (including
+// empty) -> false, so a blank/unset field defaults to OFF rather than
+// silently misbehaving.
+bool parseSwitchOn(const char *value) {
+  return strcasecmp(value, "on") == 0 || strcasecmp(value, "1") == 0 || strcasecmp(value, "true") == 0;
+}
+
+void computeRfCodes() {
+  uint8_t addr = dipAddressNibble(parseSwitchOn(dip1), parseSwitchOn(dip2),
+                                    parseSwitchOn(dip3), parseSwitchOn(dip4));
+  rfCodeFanLow    = RF_CODE_FAN_LOW_BASE    | addr;
+  rfCodeFanMedium = RF_CODE_FAN_MEDIUM_BASE | addr;
+  rfCodeFanHigh   = RF_CODE_FAN_HIGH_BASE   | addr;
+  rfCodeFanOff    = RF_CODE_FAN_OFF_BASE    | addr;
+  rfCodeLight     = RF_CODE_LIGHT_BASE      | addr;
+  logf("DIP switches %s/%s/%s/%s -> address nibble %d -> low=%u med=%u high=%u off=%u light=%u",
+       dip1, dip2, dip3, dip4, addr,
+       rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight);
 }
 
 void setupWiFiManager() {
@@ -429,6 +481,10 @@ void setupWiFiManager() {
   WiFiManagerParameter customFanId("fanid", "SinricPro Fan Device ID", fanId, sizeof(fanId));
   WiFiManagerParameter customLightId("lightid", "SinricPro Light Device ID", lightId, sizeof(lightId));
   WiFiManagerParameter customHostname("hostname", "Device hostname (e.g. myfan -&gt; myfan.local)", hostname, sizeof(hostname));
+  WiFiManagerParameter customDip1("dip1", "Remote DIP switch 1 (on/off)", dip1, sizeof(dip1));
+  WiFiManagerParameter customDip2("dip2", "Remote DIP switch 2 (on/off)", dip2, sizeof(dip2));
+  WiFiManagerParameter customDip3("dip3", "Remote DIP switch 3 (on/off)", dip3, sizeof(dip3));
+  WiFiManagerParameter customDip4("dip4", "Remote DIP switch 4 (on/off)", dip4, sizeof(dip4));
 
   WiFiManager wm;
   wm.setTitle("Fan Controller");
@@ -438,6 +494,10 @@ void setupWiFiManager() {
   wm.addParameter(&customFanId);
   wm.addParameter(&customLightId);
   wm.addParameter(&customHostname);
+  wm.addParameter(&customDip1);
+  wm.addParameter(&customDip2);
+  wm.addParameter(&customDip3);
+  wm.addParameter(&customDip4);
   wm.setConfigPortalTimeout(WIFI_PORTAL_TIMEOUT_SEC);
 
   // Force a clean radio reset before autoConnect() decides whether to try
@@ -473,10 +533,20 @@ void setupWiFiManager() {
   lightId[sizeof(lightId) - 1] = '\0';
   strncpy(hostname, customHostname.getValue(), sizeof(hostname) - 1);
   hostname[sizeof(hostname) - 1] = '\0';
+  strncpy(dip1, customDip1.getValue(), sizeof(dip1) - 1);
+  dip1[sizeof(dip1) - 1] = '\0';
+  strncpy(dip2, customDip2.getValue(), sizeof(dip2) - 1);
+  dip2[sizeof(dip2) - 1] = '\0';
+  strncpy(dip3, customDip3.getValue(), sizeof(dip3) - 1);
+  dip3[sizeof(dip3) - 1] = '\0';
+  strncpy(dip4, customDip4.getValue(), sizeof(dip4) - 1);
+  dip4[sizeof(dip4) - 1] = '\0';
 
   if (shouldSaveSinricConfig) {
     saveSinricConfig();
   }
+
+  computeRfCodes();
 
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
@@ -670,7 +740,7 @@ void setupSinricPro() {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(2000);
   Serial.println();
   Serial.println(BANNER);
 

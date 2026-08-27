@@ -19,7 +19,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-25r3"
+#define FIRMWARE_VERSION "2026-08-27r1"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -52,12 +52,38 @@ R"(  __  __         _____
 #define RF_PULSE_US     412
 #define RF_BITLENGTH    12
 
-// Codes captured with sniff.ino
-#define RF_CODE_FAN_LOW    2044
-#define RF_CODE_FAN_MEDIUM 3836
-#define RF_CODE_FAN_HIGH   3964
-#define RF_CODE_FAN_OFF    4028
-#define RF_CODE_LIGHT      3068
+// Base codes captured with sniff.ino, with all 4 DIP switches ON (address
+// nibble 0000). This remote encodes its DIP switch address as the low 4
+// bits of the 12-bit code, OFF=1/ON=0 per switch (switch 1 = bit 3 down to
+// switch 4 = bit 0) -- confirmed by sniffing the same 5 buttons across 3
+// different switch combinations and finding only that nibble changes. The
+// actual per-fan codes are computed at boot by OR-ing this base with the
+// address nibble for DIP_SWITCH_1..4 in secrets.h (see dipAddressNibble()).
+// Re-run sniff.ino with all switches ON to recapture these for a different
+// remote.
+#define RF_CODE_FAN_LOW_BASE    2032
+#define RF_CODE_FAN_MEDIUM_BASE 3824
+#define RF_CODE_FAN_HIGH_BASE   3952
+#define RF_CODE_FAN_OFF_BASE    4016
+#define RF_CODE_LIGHT_BASE      3056
+
+// Address nibble encoded by the remote's DIP switches: each switch
+// contributes one bit (1->bit3 .. 4->bit0), OFF = 1, ON = 0. OR'd with the
+// base codes above to get this fan's actual RF codes.
+uint8_t dipAddressNibble(bool sw1On, bool sw2On, bool sw3On, bool sw4On) {
+  return (sw1On ? 0 : 8) | (sw2On ? 0 : 4) | (sw3On ? 0 : 2) | (sw4On ? 0 : 1);
+}
+
+uint16_t rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight;
+
+void computeRfCodes() {
+  uint8_t addr = dipAddressNibble(DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4);
+  rfCodeFanLow    = RF_CODE_FAN_LOW_BASE    | addr;
+  rfCodeFanMedium = RF_CODE_FAN_MEDIUM_BASE | addr;
+  rfCodeFanHigh   = RF_CODE_FAN_HIGH_BASE   | addr;
+  rfCodeFanOff    = RF_CODE_FAN_OFF_BASE    | addr;
+  rfCodeLight     = RF_CODE_LIGHT_BASE      | addr;
+}
 
 // ==========================================
 // Reliability: WiFi watchdog + daily reboot
@@ -266,10 +292,10 @@ void checkLedBlink() {
 
 void sendFanCode(int speed) {
   switch (speed) {
-    case 1: myRadio.send(RF_CODE_FAN_LOW, RF_BITLENGTH); break;
-    case 2: myRadio.send(RF_CODE_FAN_MEDIUM, RF_BITLENGTH); break;
-    case 3: myRadio.send(RF_CODE_FAN_HIGH, RF_BITLENGTH); break;
-    default: myRadio.send(RF_CODE_FAN_OFF, RF_BITLENGTH); break;
+    case 1: myRadio.send(rfCodeFanLow, RF_BITLENGTH); break;
+    case 2: myRadio.send(rfCodeFanMedium, RF_BITLENGTH); break;
+    case 3: myRadio.send(rfCodeFanHigh, RF_BITLENGTH); break;
+    default: myRadio.send(rfCodeFanOff, RF_BITLENGTH); break;
   }
   ledBlinkStart();
 }
@@ -316,7 +342,7 @@ bool onLightPowerState(const String &deviceId, bool &state) {
   logf("Light requested: %s (currently tracked as %s)",
        state ? "ON" : "OFF", lightState ? "ON" : "OFF");
   if (state != lightState) {
-    myRadio.send(RF_CODE_LIGHT, RF_BITLENGTH);
+    myRadio.send(rfCodeLight, RF_BITLENGTH);
     ledBlinkStart();
     lightState = state;
   }
@@ -530,6 +556,12 @@ void setup() {
   prefs.end();
 
   checkUnexpectedReset();
+
+  computeRfCodes();
+  logf("DIP switches %d%d%d%d -> address nibble %d -> low=%u med=%u high=%u off=%u light=%u",
+       DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4,
+       dipAddressNibble(DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4),
+       rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight);
 
   setupRadio();
   setupWiFi();
