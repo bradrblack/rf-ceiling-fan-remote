@@ -9,17 +9,21 @@
 //
 // Assembly: no screws hold the PCB itself. The PCB sits on 4 pads and is
 // located by pins that poke up through its mounting holes. The top piece
-// slides in lengthwise from the open (cable) end and nests INSIDE the
-// tray's own side walls, stopping against the tray's closed far-end wall.
-// As it slides home, a keyhole-slotted hook post on the underside of the
-// top catches each pin and holds the PCB down against its pad -- no
-// separate parts, and it's still removable by sliding the top back out. A
-// rail along each of the tray's long walls engages a matching groove in
-// the top's skirts, so the top itself can't be lifted straight off the
-// tray either -- it only comes off by sliding back out. One M3 locking
-// screw goes through the tray floor (recessed counterbore on the
+// drops straight down onto the tray (skirts nest inside the tray's own
+// walls with a snug fit_clearance) -- NOT a horizontal slide-in. A plain
+// washer-shaped hook post hangs from the ceiling over each pin, clearing
+// it on the way down and coming to rest just above the board once seated;
+// it holds the PCB down passively, the same way a washer under a screw
+// head does, simply because the rigid top above it isn't going anywhere.
+// That "isn't going anywhere" is doing real work: unlike a slide-to-lock
+// mechanism, a snug friction fit alone does not resist being pulled
+// straight back up, and a slotted/keyed hook can't either without either
+// colliding with the pin during any sideways lock motion or requiring a
+// wider-headed pin than this design uses (the geometry was checked both
+// ways). What actually keeps the case shut is the one M3 locking screw,
+// straight down through the tray floor (recessed counterbore on the
 // underside) into a blind boss on the top, past the closed far end of the
-// board, to stop it from sliding back open once everything's seated. The
+// board. Everything else here is fit and alignment, not a lock. The
 // tray's open (cable) end has a short fixed stub wall covering its bottom
 // third; the top's leading wall picks up right where that stops and
 // covers the rest, closing off the whole opening between them except for
@@ -101,41 +105,30 @@ vent_spacing = 6;      // grid pitch
 vent_margin = 8;       // keep dots this far from the outer edge
 vent_exclude_r = 6;    // skip any dot this close to the button tunnel
 
-// Alignment pins (replace the old screw bosses) + sliding retention hooks.
+// Alignment pins (replace the old screw bosses) + PCB retention washers.
 // UNVALIDATED -- these are first-pass guesses for a friction/clearance fit
 // and need a test print before trusting them.
 pin_d = 2.2;               // pin diameter -- clearance fit through the board's 2.5mm holes
 pin_h = 4;                   // pin height above the pad top (must clear board_t + hook post + slack)
 hook_gap_above_board = 0.3; // gap between the board's top surface and the hook post's bottom
-hook_od = 5.5;               // hook post outer diameter -- kept small so it clears the skirts
+hook_od = 5.5;               // washer outer diameter -- kept small so it clears the skirts
                               // at this design's mount-hole Y positions; re-check if those move
-hook_pin_clearance = 0.6;   // extra width around the pin in the hook's hole/slot, for a free slide
+hook_pin_clearance = 0.6;   // extra width around the pin in the washer's hole, for a free drop-through
 
-// Retention rails: a continuous inward lip along each of the tray's long
-// walls, engaging a matching groove cut into the top's skirts. Without
-// this, nothing stops the top piece from simply lifting straight up off
-// the tray -- the hooks only hold the PCB down against its pins, they
-// don't hold the top down against the tray. Runs the full slide length,
-// so it doesn't block sliding in/out, only vertical separation.
-rail_protrusion = 0.8;   // how far the rail sticks in from the tray wall's inner face
-rail_h = 1.5;               // rail height (vertical)
-rail_clearance = 0.3;      // clearance around the rail inside the groove
-
-// Near-end stub wall: the tray's near (cable) end is open so the top can
-// slide in, but a short fixed wall up to end_wall_frac of the tray's
-// height closes off the bottom part on the tray side itself. The top's
-// leading wall picks up from exactly where this stops and covers the
-// rest, so together they seal the whole opening (minus the cable slot)
-// once assembled -- rather than the top being the only thing closing it.
+// Near-end stub wall: the tray's near (cable) end only has a short fixed
+// wall up to end_wall_frac of the tray's height. The top's leading wall
+// picks up from exactly where this stops and covers the rest, so together
+// they seal the whole opening (minus the cable slot) once assembled --
+// rather than the top being the only thing closing it.
 end_wall_frac = 1 / 3;
 
-// Locking screw: the rail/groove stops the top lifting straight up, but
-// nothing stops it sliding back out -- this adds a screw straight down
-// through the tray floor, past the closed (far) end of the board, into a
-// blind boss hanging from the top's ceiling there. Recessed counterbore
-// on the floor's underside so the head doesn't protrude. far_end_extra
-// stretches the case a bit past the board's far edge so there's room for
-// the boss clear of both the board and the end wall.
+// Locking screw: the actual thing that keeps the case shut (see the
+// header comment) -- straight down through the tray floor, past the
+// closed (far) end of the board, into a blind boss hanging from the top's
+// ceiling there. Recessed counterbore on the floor's underside so the
+// head doesn't protrude. far_end_extra stretches the case a bit past the
+// board's far edge so there's room for the boss clear of both the board
+// and the end wall.
 far_end_extra = 10;
 lock_screw_clearance_d = 3.2;      // M3 clearance
 lock_screw_counterbore_d = 6;       // recess for the screw head
@@ -163,8 +156,6 @@ tray_wall_h = standoff_h + board_t + component_clearance; // floor-top to ceilin
 skirt_bot_z = floor_t + standoff_h + board_t; // where the top's skirts/leading wall start, just above the board
 ceiling_bot_z = floor_t + tray_wall_h;
 ceiling_top_z = ceiling_bot_z + wall_t;
-rail_z_lo = skirt_bot_z + (ceiling_bot_z - skirt_bot_z) / 2 - rail_h / 2; // rail vertically centered
-                                                                            // in the skirt engagement zone
 button_tube_od = button_hole_d + 2 * button_tube_wall;
 button_tube_bot_z = skirt_bot_z + button_tube_gap_above_board;
 end_wall_top_z = floor_t + tray_wall_h * end_wall_frac;
@@ -210,8 +201,9 @@ module mount_hole_positions() {
 }
 
 // Open-ended U-channel: floor + 2 long side walls + 1 closed far-end wall
-// (at X=outer_w). The near end (X=0, cable side) is open, both for the
-// top piece to slide in from and for the cable itself to exit through.
+// (at X=outer_w). The near end (X=0, cable side) only has a short stub
+// wall up to end_wall_top_z -- the top's leading wall covers the rest
+// once dropped into place, and the cable exits through the gap either way.
 module bottom_tray() {
   difference() {
     union() {
@@ -223,22 +215,14 @@ module bottom_tray() {
         beveled_wall_low(outer_w, wall_t, tray_wall_h, top_bevel);
       translate([0, outer_h - wall_t, floor_t])
         beveled_wall_high(outer_w, wall_t, tray_wall_h, top_bevel);
-      // closed far-end wall -- the slide's hard stop
+      // closed far-end wall
       translate([outer_w - wall_t, 0, floor_t])
         cube([wall_t, outer_h, tray_wall_h]);
-      // near-end stub wall -- fixed, doesn't slide, closes the bottom
-      // end_wall_frac of the open (cable) end. The top's leading wall picks
-      // up right where this stops (see top_slide()), so the two don't
-      // occupy the same space -- the top would have nowhere to slide into
-      // if this reached as high as the top's own leading wall does.
+      // near-end stub wall -- closes the bottom end_wall_frac of the open
+      // (cable) end. The top's leading wall picks up right where this
+      // stops (see top_slide()), so the two seal the opening together.
       translate([0, 0, floor_t])
         cube([wall_t, outer_h, end_wall_top_z - floor_t]);
-      // retention rails, full length, engaging the top's skirt grooves so
-      // the top can't be lifted straight up once slid into place
-      translate([0, wall_t, rail_z_lo])
-        cube([outer_w, rail_protrusion, rail_h]);
-      translate([0, outer_h - wall_t - rail_protrusion, rail_z_lo])
-        cube([outer_w, rail_protrusion, rail_h]);
       // 4 mounting pads with alignment pins on top
       mount_hole_positions()
         union() {
@@ -267,21 +251,19 @@ module vent_holes(ceiling_z) {
           cylinder(d = vent_hole_d, h = wall_t + 1);
 }
 
-// One retention hook, built at the local origin (XY centered on a pin).
-// The entire suspended post -- not just a cap at the bottom -- is shaped
-// like the hook: a disk with a pin-clearance hole and a slot cut from its
-// +X edge to that hole, extruded the full height from just above the
-// board up to the ceiling. +X is the "leading" side, the direction from
-// which each pin enters the hook as the top piece slides forward (+X)
-// into its seated position.
+// One PCB retention washer, built at the local origin (XY centered on a
+// pin). A plain ring -- not slotted or keyed to the pin -- extruded the
+// full height from just above the board up to the ceiling. The pin passes
+// straight through the ring's clearance hole on the way down; once
+// seated, the ring's solid annulus rests near the board's surface around
+// its mounting hole and holds it down passively, since the rigid top it
+// hangs from can't lift away (see the locking screw, header comment).
 module hook_post(hook_bot_z, ceiling_top_z) {
   translate([0, 0, hook_bot_z])
     linear_extrude(height = ceiling_top_z - wall_t - hook_bot_z)
       difference() {
         circle(d = hook_od);
         circle(d = pin_d + hook_pin_clearance);
-        translate([-0.5, -(pin_d + hook_pin_clearance) / 2])
-          square([hook_od / 2 + 1.5, pin_d + hook_pin_clearance]);
       }
 }
 
@@ -297,11 +279,11 @@ module beveled_top(w, h, t, bevel) {
 }
 
 // Ceiling + 2 skirt walls, nested just inside the tray's long walls with
-// fit_clearance, plus a hook_post() over each pin and a leading-edge wall
-// that closes off the open (cable) end down to a small round port. Built
-// directly in the tray's own coordinate frame (same X/Y/Z as
-// bottom_tray()) at its final, fully-seated position -- no translate
-// needed to assemble it.
+// fit_clearance, plus a hook_post() washer over each pin and a
+// leading-edge wall that closes off the open (cable) end down to a small
+// round port. Built directly in the tray's own coordinate frame (same
+// X/Y/Z as bottom_tray()) -- drops straight down onto the tray, no
+// translate needed to assemble it.
 module top_slide() {
   hook_bot_z = skirt_bot_z + hook_gap_above_board;
 
@@ -318,9 +300,7 @@ module top_slide() {
         cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
       // leading-edge wall: picks up exactly where the tray's fixed stub
       // wall stops (end_wall_top_z) and covers the rest up to the
-      // ceiling -- can't reach all the way to the floor itself, since
-      // that space is occupied by the tray's own stub wall, fixed and
-      // already in the way of any lower reach as the top slides in
+      // ceiling, sealing the opening together with the stub wall
       translate([0, 0, end_wall_top_z])
         cube([wall_t, outer_h, ceiling_top_z - end_wall_top_z]);
       // retention hooks, one per mounting pin
@@ -349,23 +329,15 @@ module top_slide() {
     // bottom edge (end_wall_top_z, where the tray's stub wall stops) --
     // a fully closed hole would mean threading the whole cable
     // (including whatever's on its far end) through before the top could
-    // even start sliding on. This way the cable gets plugged into the
-    // board first, then the top slides into place around it. Straight
-    // sides down to the wall's bottom, rounded off at the top where the
-    // cable actually rests.
+    // even be dropped on. This way the cable gets plugged into the board
+    // first, then the top drops into place around it. Straight sides
+    // down to the wall's bottom, rounded off at the top where the cable
+    // actually rests.
     translate([-0.5, board_origin[1] + usb_hole_y - usb_hole_d / 2, end_wall_top_z])
       cube([wall_t + 1, usb_hole_d, (skirt_bot_z + usb_hole_z_above_board) - end_wall_top_z]);
     translate([-0.5, board_origin[1] + usb_hole_y, skirt_bot_z + usb_hole_z_above_board])
       rotate([0, 90, 0])
         cylinder(d = usb_hole_d, h = wall_t + 1);
-    // grooves matching the tray's retention rails -- sized to just clear
-    // the rail (rail_protrusion + rail_clearance deep), not padded out
-    // further, so the skirt (wall_t = 2mm thick) keeps solid material
-    // behind the groove instead of being cut through
-    translate([-1, wall_t, rail_z_lo - rail_clearance])
-      cube([outer_w + 2, rail_protrusion + rail_clearance, rail_h + 2 * rail_clearance]);
-    translate([-1, outer_h - wall_t - rail_protrusion - rail_clearance, rail_z_lo - rail_clearance])
-      cube([outer_w + 2, rail_protrusion + rail_clearance, rail_h + 2 * rail_clearance]);
   }
 }
 
