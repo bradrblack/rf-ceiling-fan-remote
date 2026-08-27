@@ -11,9 +11,14 @@
 // poke up through its mounting holes. The top piece slides in lengthwise
 // from the open (cable) end and nests INSIDE the tray's own side walls,
 // stopping against the tray's closed far-end wall. As it slides home, a
-// keyhole-slotted hook tab on the underside of the top catches each pin
+// keyhole-slotted hook post on the underside of the top catches each pin
 // and holds the PCB down against its pad -- no separate parts, and it's
-// still removable by sliding the top back out.
+// still removable by sliding the top back out. A rail along each of the
+// tray's long walls engages a matching groove in the top's skirts, so the
+// top itself can't be lifted straight off the tray either -- it only
+// comes off by sliding back out the way it went in. The top's leading
+// edge is a full wall reaching down to the tray floor, closing off the
+// whole open end except for a small round cable port.
 //
 // Render in OpenSCAD, or from the command line:
 //   openscad -o tray.stl   -D 'part="tray"' fan_dongle_case.scad
@@ -49,13 +54,17 @@ cc1101_outline = [16, 19];
 // header-stack height. Increase if your modules are taller than this.
 component_clearance = 8;
 
-// USB-C cable: modules face the board's short left edge (X=0), and that
-// whole end of the tray is open (no wall) so the top piece can slide in
-// from there -- the cable just exits through that same open port, bounded
-// above by the top's ceiling and on the sides by the tray's long walls.
-// usb_hole_y kept for reference/future strain-relief notch, not currently
-// used to cut anything.
-usb_hole_y = 12;      // centered on board Y (= ESP32 module Y-center)
+// USB-C cable: modules face the board's short left edge (X=0). The tray's
+// near end has no wall (so the top piece can slide in from there), but the
+// top piece's own leading edge carries a small end wall with just a round
+// port for the cable -- closes off the rest of that opening once the top
+// is fully slid home.
+usb_hole_d = 6;                // cable port diameter
+usb_hole_y = 12;               // centered on board Y (= ESP32 module Y-center)
+usb_hole_z_above_board = 3.7; // port center height above the board's top surface -- guess, verify
+                                // (kept off usb_hole_d/2 exactly -- that coincidence put the
+                                // port's bottom edge exactly on the wall's own bottom face and
+                                // produced a non-manifold cut)
 
 // Reset-button poke-hole tunnel: button is top-mounted (pressed straight
 // down) -- vertical hole through the top piece's ceiling. Position is a
@@ -80,13 +89,21 @@ vent_exclude_r = 6;    // skip any dot this close to the LED/button holes
 // UNVALIDATED -- these are first-pass guesses for a friction/clearance fit
 // and need a test print before trusting them.
 pin_d = 2.2;               // pin diameter -- clearance fit through the board's 2.5mm holes
-pin_h = 4;                   // pin height above the pad top (must clear board_t + hook_h + slack)
-hook_gap_above_board = 0.3; // gap between the board's top surface and the hook tab's bottom
-hook_h = 1.6;                // hook tab thickness (vertical)
-hook_od = 5.5;               // hook tab outer diameter -- kept small so it clears the skirts
+pin_h = 4;                   // pin height above the pad top (must clear board_t + hook post + slack)
+hook_gap_above_board = 0.3; // gap between the board's top surface and the hook post's bottom
+hook_od = 5.5;               // hook post outer diameter -- kept small so it clears the skirts
                               // at this design's mount-hole Y positions; re-check if those move
 hook_pin_clearance = 0.6;   // extra width around the pin in the hook's hole/slot, for a free slide
-hook_rib_w = 2.5;            // width of the support rib connecting each hook up to the ceiling
+
+// Retention rails: a continuous inward lip along each of the tray's long
+// walls, engaging a matching groove cut into the top's skirts. Without
+// this, nothing stops the top piece from simply lifting straight up off
+// the tray -- the hooks only hold the PCB down against its pins, they
+// don't hold the top down against the tray. Runs the full slide length,
+// so it doesn't block sliding in/out, only vertical separation.
+rail_protrusion = 0.8;   // how far the rail sticks in from the tray wall's inner face
+rail_h = 1.5;               // rail height (vertical)
+rail_clearance = 0.3;      // clearance around the rail inside the groove
 
 // ==========================================
 // Case construction parameters
@@ -104,6 +121,11 @@ cavity_h = board_h + 2 * board_margin;
 outer_w = cavity_w + 2 * wall_t;
 outer_h = cavity_h + 2 * wall_t;
 tray_wall_h = standoff_h + board_t + component_clearance; // floor-top to ceiling-bottom
+skirt_bot_z = floor_t + standoff_h + board_t; // where the top's skirts/leading wall start, just above the board
+ceiling_bot_z = floor_t + tray_wall_h;
+ceiling_top_z = ceiling_bot_z + wall_t;
+rail_z_lo = skirt_bot_z + (ceiling_bot_z - skirt_bot_z) / 2 - rail_h / 2; // rail vertically centered
+                                                                            // in the skirt engagement zone
 
 // Board-local -> case-local (board sits centered in the cavity, offset by
 // wall_t + board_margin from the case's own bottom-left corner)
@@ -134,6 +156,12 @@ module bottom_tray() {
     // closed far-end wall -- the slide's hard stop
     translate([outer_w - wall_t, 0, floor_t])
       cube([wall_t, outer_h, tray_wall_h]);
+    // retention rails, full length, engaging the top's skirt grooves so
+    // the top can't be lifted straight up once slid into place
+    translate([0, wall_t, rail_z_lo])
+      cube([outer_w, rail_protrusion, rail_h]);
+    translate([0, outer_h - wall_t - rail_protrusion, rail_z_lo])
+      cube([outer_w, rail_protrusion, rail_h]);
     // 4 mounting pads with alignment pins on top
     mount_hole_positions()
       union() {
@@ -155,34 +183,31 @@ module vent_holes(ceiling_z) {
           cylinder(d = vent_hole_d, h = wall_t + 1);
 }
 
-// One retention hook + its support rib, built at the local origin (XY
-// centered on a pin). The hook is a disk with a pin-clearance hole and a
-// slot cut from its +X edge to that hole -- +X is the "leading" side, the
-// direction from which each pin enters the hook as the top piece slides
-// forward (+X) into its seated position. The rib rises from the disk's
-// solid trailing (-X) half, clear of the slot, up to the ceiling.
-module hook_and_rib(hook_bot_z, ceiling_top_z) {
-  union() {
-    translate([0, 0, hook_bot_z])
+// One retention hook, built at the local origin (XY centered on a pin).
+// The entire suspended post -- not just a cap at the bottom -- is shaped
+// like the hook: a disk with a pin-clearance hole and a slot cut from its
+// +X edge to that hole, extruded the full height from just above the
+// board up to the ceiling. +X is the "leading" side, the direction from
+// which each pin enters the hook as the top piece slides forward (+X)
+// into its seated position.
+module hook_post(hook_bot_z, ceiling_top_z) {
+  translate([0, 0, hook_bot_z])
+    linear_extrude(height = ceiling_top_z - wall_t - hook_bot_z)
       difference() {
-        cylinder(d = hook_od, h = hook_h);
-        cylinder(d = pin_d + hook_pin_clearance, h = hook_h + 1);
-        translate([0, -(pin_d + hook_pin_clearance) / 2, -0.5])
-          cube([hook_od / 2 + 1, pin_d + hook_pin_clearance, hook_h + 1]);
+        circle(d = hook_od);
+        circle(d = pin_d + hook_pin_clearance);
+        translate([-0.5, -(pin_d + hook_pin_clearance) / 2])
+          square([hook_od / 2 + 1.5, pin_d + hook_pin_clearance]);
       }
-    translate([-hook_od / 2, -hook_rib_w / 2, hook_bot_z])
-      cube([hook_od / 2, hook_rib_w, ceiling_top_z - wall_t - hook_bot_z]);
-  }
 }
 
 // Ceiling + 2 skirt walls, nested just inside the tray's long walls with
-// fit_clearance, plus a hook_and_rib() over each pin. Built directly in
-// the tray's own coordinate frame (same X/Y/Z as bottom_tray()) at its
-// final, fully-seated position -- no translate needed to assemble it.
+// fit_clearance, plus a hook_post() over each pin and a leading-edge wall
+// that closes off the open (cable) end down to a small round port. Built
+// directly in the tray's own coordinate frame (same X/Y/Z as
+// bottom_tray()) at its final, fully-seated position -- no translate
+// needed to assemble it.
 module top_slide() {
-  skirt_bot_z = floor_t + standoff_h + board_t; // rests just above the board
-  ceiling_bot_z = floor_t + tray_wall_h;
-  ceiling_top_z = ceiling_bot_z + wall_t;
   hook_bot_z = skirt_bot_z + hook_gap_above_board;
 
   difference() {
@@ -195,9 +220,13 @@ module top_slide() {
         cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
       translate([0, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z])
         cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
+      // leading-edge wall: down to the tray floor, closing the whole open
+      // end once slid home except for the cable port cut below
+      translate([0, 0, floor_t])
+        cube([wall_t, outer_h, ceiling_top_z - floor_t]);
       // retention hooks, one per mounting pin
       mount_hole_positions()
-        hook_and_rib(hook_bot_z, ceiling_top_z);
+        hook_post(hook_bot_z, ceiling_top_z);
     }
     // external LED hole
     translate([outer_w / 2, outer_h / 2, ceiling_bot_z - 0.5])
@@ -207,6 +236,15 @@ module top_slide() {
       cylinder(d = button_hole_d, h = wall_t + 1);
     // ventilation dot grid
     vent_holes(ceiling_bot_z);
+    // cable port through the leading-edge wall
+    translate([-0.5, board_origin[1] + usb_hole_y, skirt_bot_z + usb_hole_z_above_board])
+      rotate([0, 90, 0])
+        cylinder(d = usb_hole_d, h = wall_t + 1);
+    // grooves matching the tray's retention rails
+    translate([-1, wall_t - 1, rail_z_lo - rail_clearance])
+      cube([outer_w + 2, rail_protrusion + rail_clearance + 1.5, rail_h + 2 * rail_clearance]);
+    translate([-1, outer_h - wall_t - rail_protrusion - rail_clearance - 1.5, rail_z_lo - rail_clearance])
+      cube([outer_w + 2, rail_protrusion + rail_clearance + 1.5, rail_h + 2 * rail_clearance]);
   }
 }
 
