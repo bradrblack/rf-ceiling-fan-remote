@@ -20,11 +20,13 @@
 // straight back up, and a slotted/keyed hook can't either without either
 // colliding with the pin during any sideways lock motion or requiring a
 // wider-headed pin than this design uses (the geometry was checked both
-// ways). What actually keeps the case shut is the one M3 locking screw,
-// straight down through the tray floor (recessed counterbore on the
-// underside) into a blind boss on the top, past the closed far end of the
-// board. Everything else here is fit and alignment, not a lock. The
-// tray's open (cable) end has a short fixed stub wall covering its bottom
+// ways). What actually keeps the case shut is a snap-fit latch: one
+// flexible cantilever tab per long wall, engaging a ramped catch ridge on
+// the tray wall as the top drops down (a locking screw was tried first,
+// but the CC1101's antenna coils well past the board's far edge, right
+// where the screw boss needed to sit). Everything else here is fit and
+// alignment, not a lock. The tray's open (cable) end has a short fixed
+// stub wall covering its bottom
 // third; the top's leading wall picks up right where that stops and
 // covers the rest, closing off the whole opening between them except for
 // a slot sized to the cable itself. Both the top's outer edge and the
@@ -102,7 +104,10 @@ top_bevel = 1.2;
 // tunnel so nothing merges awkwardly close together.
 vent_hole_d = 2;
 vent_spacing = 6;      // grid pitch
-vent_margin = 8;       // keep dots this far from the outer edge
+vent_margin = 6;       // dots stay at LEAST this far from the outer edge --
+                         // the grid is centered on the ceiling, so the actual
+                         // margin is whatever's left over after fitting as
+                         // many rows/columns as possible at this spacing
 vent_exclude_r = 6;    // skip any dot this close to the button tunnel
 
 // Alignment pins (replace the old screw bosses) + PCB retention washers.
@@ -122,20 +127,27 @@ hook_pin_clearance = 0.6;   // extra width around the pin in the washer's hole, 
 // rather than the top being the only thing closing it.
 end_wall_frac = 1 / 3;
 
-// Locking screw: the actual thing that keeps the case shut (see the
-// header comment) -- straight down through the tray floor, past the
-// closed (far) end of the board, into a blind boss hanging from the top's
-// ceiling there. Recessed counterbore on the floor's underside so the
-// head doesn't protrude. far_end_extra stretches the case a bit past the
-// board's far edge so there's room for the boss clear of both the board
-// and the end wall.
+// far_end_extra used to exist for a locking screw boss past the board's
+// far edge -- dropped (see snap-fit below) because the CC1101's antenna
+// coils well past that point, right where the boss would have been. Kept
+// as a general buffer past the board's far edge; may need to grow a lot
+// once the antenna's real reach is measured.
 far_end_extra = 10;
-lock_screw_clearance_d = 3.2;      // M3 clearance
-lock_screw_counterbore_d = 6;       // recess for the screw head
-lock_screw_counterbore_depth = 2.2;
-lock_screw_pilot_d = 2.5;           // self-tap pilot into the boss
-lock_screw_pilot_depth = 8;
-lock_screw_boss_od = 7;
+
+// Snap-fit latch: what actually keeps the case shut, now that a screw in
+// the far-end gap isn't an option. One flexible cantilever tab per long
+// wall, centered along the board's length, engaging a ramped ridge on the
+// tray wall -- ramped on the entry (bottom) side for a smooth push as the
+// top drops down, flat on the catch (top) side so pulling the top back
+// off requires deliberately flexing the tab back out. UNVALIDATED --
+// first pass, needs a test print to confirm the tab actually flexes
+// without snapping in your printed material (PLA especially is brittle;
+// may need a wider/thicker tab, or a more flexible filament, to survive
+// repeated opening).
+snap_tab_w = 8;               // tab width
+snap_tab_thickness = 1;       // tab thickness (thinner than wall_t, for flex)
+snap_bump_protrusion = 0.6;  // how far the catch bump sticks out
+snap_engage_h = 3;             // ridge/catch engagement height
 
 // ==========================================
 // Case construction parameters
@@ -166,10 +178,11 @@ board_origin = [wall_t + board_margin, wall_t + board_margin];
 
 function b2c(p) = [p[0] + board_origin[0], p[1] + board_origin[1]];
 
-// centered in the far_end_extra gap between the board's far edge and the
-// tray's closed far wall
-lock_screw_x = board_origin[0] + board_w + far_end_extra / 2;
-lock_screw_y = outer_h / 2;
+// snap-fit tab/ridge position: centered along the board's length, and
+// vertically centered in the skirt's engagement zone (same spot the old
+// rail used to sit)
+snap_x = board_origin[0] + board_w / 2;
+snap_z_lo = skirt_bot_z + (ceiling_bot_z - skirt_bot_z) / 2 - snap_engage_h / 2;
 
 // Bevel to match the top's, applied to the top outer edge of the tray's
 // long side walls -- only the exterior-facing surface tapers; the
@@ -192,6 +205,31 @@ module beveled_wall_high(length, thickness, height, bevel) {
   }
 }
 
+// Snap-fit catch ridges, wedge-shaped: full snap_bump_protrusion at the
+// bottom (snap_z_lo), tapering to ~flush at the top (snap_z_lo +
+// snap_engage_h). A tab sliding down past this ramps outward gradually
+// (easy); pulling back up hits the flat, full-width bottom face
+// immediately (hard) -- that asymmetry is what makes it a catch and not
+// just a bump.
+module snap_ridge_low() {
+  // attaches to the low wall's inner face (Y=wall_t), protrudes toward +Y
+  translate([snap_x - snap_tab_w / 2 - 1, wall_t, snap_z_lo])
+    hull() {
+      cube([snap_tab_w + 2, snap_bump_protrusion, 0.1]);
+      translate([0, 0, snap_engage_h])
+        cube([snap_tab_w + 2, 0.1, 0.1]);
+    }
+}
+module snap_ridge_high() {
+  // attaches to the high wall's inner face (Y=outer_h-wall_t), protrudes toward -Y
+  translate([snap_x - snap_tab_w / 2 - 1, outer_h - wall_t - snap_bump_protrusion, snap_z_lo])
+    hull() {
+      cube([snap_tab_w + 2, snap_bump_protrusion, 0.1]);
+      translate([0, snap_bump_protrusion - 0.1, snap_engage_h])
+        cube([snap_tab_w + 2, 0.1, 0.1]);
+    }
+}
+
 $fn = 48; // smooth cylinders
 
 part = "both"; // overridden via -D 'part="tray"' / "top" / "both" for preview
@@ -205,50 +243,56 @@ module mount_hole_positions() {
 // wall up to end_wall_top_z -- the top's leading wall covers the rest
 // once dropped into place, and the cable exits through the gap either way.
 module bottom_tray() {
-  difference() {
-    union() {
-      // floor
-      cube([outer_w, outer_h, floor_t]);
-      // long side walls, full tray height, spanning the whole length --
-      // bevel to match the top's, on the exterior-facing side only
-      translate([0, 0, floor_t])
-        beveled_wall_low(outer_w, wall_t, tray_wall_h, top_bevel);
-      translate([0, outer_h - wall_t, floor_t])
-        beveled_wall_high(outer_w, wall_t, tray_wall_h, top_bevel);
-      // closed far-end wall
-      translate([outer_w - wall_t, 0, floor_t])
-        cube([wall_t, outer_h, tray_wall_h]);
-      // near-end stub wall -- closes the bottom end_wall_frac of the open
-      // (cable) end. The top's leading wall picks up right where this
-      // stops (see top_slide()), so the two seal the opening together.
-      translate([0, 0, floor_t])
-        cube([wall_t, outer_h, end_wall_top_z - floor_t]);
-      // 4 mounting pads with alignment pins on top
-      mount_hole_positions()
-        union() {
-          translate([0, 0, floor_t])
-            cylinder(d = boss_d, h = standoff_h);
-          translate([0, 0, floor_t + standoff_h])
-            cylinder(d = pin_d, h = pin_h);
-        }
-    }
-    // locking screw: clearance hole through the floor, with a recessed
-    // counterbore on the underside so the head sits flush/below the
-    // bottom surface
-    translate([lock_screw_x, lock_screw_y, -0.5])
-      cylinder(d = lock_screw_clearance_d, h = floor_t + 1);
-    translate([lock_screw_x, lock_screw_y, -0.5])
-      cylinder(d = lock_screw_counterbore_d, h = lock_screw_counterbore_depth + 0.5);
+  union() {
+    // floor
+    cube([outer_w, outer_h, floor_t]);
+    // long side walls, full tray height, spanning the whole length --
+    // bevel to match the top's, on the exterior-facing side only
+    translate([0, 0, floor_t])
+      beveled_wall_low(outer_w, wall_t, tray_wall_h, top_bevel);
+    translate([0, outer_h - wall_t, floor_t])
+      beveled_wall_high(outer_w, wall_t, tray_wall_h, top_bevel);
+    // closed far-end wall
+    translate([outer_w - wall_t, 0, floor_t])
+      cube([wall_t, outer_h, tray_wall_h]);
+    // near-end stub wall -- closes the bottom end_wall_frac of the open
+    // (cable) end. The top's leading wall picks up right where this
+    // stops (see top_slide()), so the two seal the opening together.
+    translate([0, 0, floor_t])
+      cube([wall_t, outer_h, end_wall_top_z - floor_t]);
+    // snap-fit catch ridges, one per long wall (snap_z_lo is already an
+    // absolute Z, no extra offset needed)
+    snap_ridge_low();
+    snap_ridge_high();
+    // 4 mounting pads with alignment pins on top
+    mount_hole_positions()
+      union() {
+        translate([0, 0, floor_t])
+          cylinder(d = boss_d, h = standoff_h);
+        translate([0, 0, floor_t + standoff_h])
+          cylinder(d = pin_d, h = pin_h);
+      }
   }
 }
 
+// Grid is centered on the ceiling (equal leftover margin on every side),
+// not just started at vent_margin and run until it stops fitting -- fits
+// as many full rows/columns as possible at vent_spacing, at least
+// vent_margin from the edge.
 module vent_holes(ceiling_z) {
   btn_pos = [board_origin[0] + button_hole_x, board_origin[1] + button_hole_y];
-  for (x = [vent_margin : vent_spacing : outer_w - vent_margin])
-    for (y = [vent_margin : vent_spacing : outer_h - vent_margin])
+  n_cols = floor((outer_w - 2 * vent_margin) / vent_spacing) + 1;
+  n_rows = floor((outer_h - 2 * vent_margin) / vent_spacing) + 1;
+  x0 = (outer_w - (n_cols - 1) * vent_spacing) / 2;
+  y0 = (outer_h - (n_rows - 1) * vent_spacing) / 2;
+  for (i = [0 : n_cols - 1])
+    for (j = [0 : n_rows - 1]) {
+      x = x0 + i * vent_spacing;
+      y = y0 + j * vent_spacing;
       if (norm([x, y] - btn_pos) > vent_exclude_r)
         translate([x, y, ceiling_z - 0.5])
           cylinder(d = vent_hole_d, h = wall_t + 1);
+    }
 }
 
 // One PCB retention washer, built at the local origin (XY centered on a
@@ -257,7 +301,7 @@ module vent_holes(ceiling_z) {
 // straight through the ring's clearance hole on the way down; once
 // seated, the ring's solid annulus rests near the board's surface around
 // its mounting hole and holds it down passively, since the rigid top it
-// hangs from can't lift away (see the locking screw, header comment).
+// hangs from can't lift away (see the snap-fit latch, header comment).
 module hook_post(hook_bot_z, ceiling_top_z) {
   translate([0, 0, hook_bot_z])
     linear_extrude(height = ceiling_top_z - wall_t - hook_bot_z)
@@ -293,16 +337,31 @@ module top_slide() {
       // cosmetic bevel around the top outer edge
       translate([0, 0, ceiling_bot_z])
         beveled_top(outer_w, outer_h, wall_t, top_bevel);
-      // skirt walls, nested just inside the tray's long walls
-      translate([0, wall_t + fit_clearance, skirt_bot_z])
-        cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
-      translate([0, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z])
-        cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
+      // skirt walls, nested just inside the tray's long walls, each thinned
+      // down to a flexible snap-fit tab at snap_x -- the matching ridge on
+      // the tray wall protrudes past this tab's resting face, so the ridge
+      // alone (already ramped/flat, see snap_ridge_low/high) creates the
+      // catch interference without needing a separate bump here
+      difference() {
+        translate([0, wall_t + fit_clearance, skirt_bot_z])
+          cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
+        translate([snap_x - snap_tab_w / 2, wall_t + fit_clearance + snap_tab_thickness, skirt_bot_z - 0.5])
+          cube([snap_tab_w, wall_t - snap_tab_thickness + 0.5, ceiling_bot_z - skirt_bot_z + 1]);
+      }
+      difference() {
+        translate([0, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z])
+          cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
+        translate([snap_x - snap_tab_w / 2, outer_h - 2 * wall_t - fit_clearance, skirt_bot_z - 0.5])
+          cube([snap_tab_w, wall_t - snap_tab_thickness + 0.5, ceiling_bot_z - skirt_bot_z + 1]);
+      }
       // leading-edge wall: picks up exactly where the tray's fixed stub
-      // wall stops (end_wall_top_z) and covers the rest up to the
-      // ceiling, sealing the opening together with the stub wall
+      // wall stops (end_wall_top_z) and covers up to the ceiling's own
+      // underside (NOT ceiling_top_z) -- stopping there, rather than
+      // overlapping the ceiling's own bevel zone, lets the ceiling's
+      // 45-degree edge taper show through on this short side too instead
+      // of being filled back in flat by this wall
       translate([0, 0, end_wall_top_z])
-        cube([wall_t, outer_h, ceiling_top_z - end_wall_top_z]);
+        cube([wall_t, outer_h, ceiling_bot_z - end_wall_top_z]);
       // retention hooks, one per mounting pin
       mount_hole_positions()
         hook_post(hook_bot_z, ceiling_top_z);
@@ -310,19 +369,10 @@ module top_slide() {
       // board (overlaps into the ceiling itself for a clean union)
       translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z])
         cylinder(d = button_tube_od, h = ceiling_top_z - button_tube_bot_z);
-      // locking screw boss, hanging from the ceiling down near the floor
-      // (leaves a little clearance below so it can't bottom out against
-      // the floor before the two halves are fully seated)
-      translate([lock_screw_x, lock_screw_y, floor_t + 1])
-        cylinder(d = lock_screw_boss_od, h = ceiling_top_z - (floor_t + 1));
     }
     // reset button bore, straight through the guide tube and the ceiling
     translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z - 0.5])
       cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
-    // locking screw's self-tap pilot hole, blind -- doesn't reach the
-    // ceiling's top surface, so the screw can't be over-driven through it
-    translate([lock_screw_x, lock_screw_y, floor_t + 1 - 0.5])
-      cylinder(d = lock_screw_pilot_d, h = lock_screw_pilot_depth + 0.5);
     // ventilation dot grid
     vent_holes(ceiling_bot_z);
     // cable slot through the leading-edge wall, open at the wall's own
