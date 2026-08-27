@@ -26,11 +26,11 @@
 // but the CC1101's antenna coils well past the board's far edge, right
 // where the screw boss needed to sit). Everything else here is fit and
 // alignment, not a lock. The tray's open (cable) end has a short fixed
-// stub wall covering its bottom
-// third; the top's leading wall picks up right where that stops and
-// covers the rest, closing off the whole opening between them except for
-// a slot sized to the cable itself. Both the top's outer edge and the
-// tray's long walls carry a matching cosmetic bevel where they meet.
+// stub wall covering its bottom third; the top's leading wall picks up
+// right where that stops and covers the rest, closing off the whole
+// opening between them except for a recessed USB-C port opening. Both
+// the top's outer edge and the tray's long walls carry a matching
+// cosmetic rounded fillet (not a chamfer) where they meet.
 //
 // Render in OpenSCAD, or from the command line:
 //   openscad -o tray.stl   -D 'part="tray"' fan_dongle_case.scad
@@ -68,17 +68,25 @@ cc1101_outline = [16, 19];
 // header-stack height. Increase if your modules are taller than this.
 component_clearance = 8;
 
-// USB-C cable: modules face the board's short left edge (X=0). The
-// tray's near end carries a short stub wall (see end_wall_frac below);
-// above that, the top piece's own leading edge closes the rest of the
-// opening except for a slot sized to the cable itself, not a connector.
-usb_hole_d = 4;                // cable slot width -- just the cable's own
-                                 // diameter, not a connector -- guess, verify
-usb_hole_y = 12;               // centered on board Y (= ESP32 module Y-center)
-usb_hole_z_above_board = 3.7; // port center height above the board's top surface -- guess, verify
-                                // (kept off usb_hole_d/2 exactly -- that coincidence put the
-                                // port's bottom edge exactly on the wall's own bottom face and
-                                // produced a non-manifold cut)
+// Recessed USB-C port: modules face the board's short left edge (X=0).
+// Rather than a soldered/attached cable routed through an open slot, this
+// assumes the Super Mini's own onboard USB-C receptacle sits right at
+// this opening -- you plug a cable in from outside whenever needed,
+// nothing threads through during assembly. ALL GUESSED, no real
+// measurement behind any of these yet -- the position assumes the
+// connector centers on the module the same way usb_port_y assumes
+// (= ESP32 module Y-center), and the size/depth are generic USB-C
+// dimensions with margin, not measured off this specific module. Treat
+// this as a placeholder to refine once the board's actual connector
+// position/height is measured -- don't cut a real part from this without
+// checking it first.
+usb_port_y = 12;                    // port center, board Y (= ESP32 module Y-center)
+usb_port_z_above_board = 4;       // port center height above the board's top surface -- guess
+usb_port_w = 10;                    // through-opening width (X) -- generous for a USB-C plug
+usb_port_h = 4;                      // through-opening height (Z)
+usb_port_recess_margin = 2;       // how much wider/taller the shallow surface recess is than
+                                      // the through-opening itself, on each side
+usb_port_recess_depth = 1;         // how far the surface recess sinks in (less than wall_t)
 
 // Reset-button guide tunnel: button is top-mounted (pressed straight
 // down). A tube hangs from the ceiling down toward the board, so a
@@ -95,8 +103,10 @@ button_tube_gap_above_board = 2;    // gap between the tube's open bottom
                                        // and the board's top surface -- guess,
                                        // verify against actual button height
 
-// Cosmetic 45-degree bevel around the top face's outer edge (all 4 sides).
-top_bevel = 1.2;
+// Cosmetic rounded fillet around the top face's outer edge (all 4 sides).
+// Kept well under wall_t/2 so the rounding stays within the wall's own
+// thickness instead of poking out the inner face.
+top_fillet = 0.8;
 
 // No external LED -- the onboard LED (GPIO8/GND) shows through the vent
 // slots in the ceiling instead of needing its own dedicated hole.
@@ -187,24 +197,32 @@ function b2c(p) = [p[0] + board_origin[0], p[1] + board_origin[1]];
 snap_x = board_origin[0] + board_w / 2;
 snap_z_lo = skirt_bot_z + (ceiling_bot_z - skirt_bot_z) / 2 - snap_engage_h / 2;
 
-// Bevel to match the top's, applied to the top outer edge of the tray's
-// long side walls -- only the exterior-facing surface tapers; the
-// interior (cavity/skirt-facing) surface stays flush so it doesn't
-// disturb the rail or the skirt fit.
-module beveled_wall_low(length, thickness, height, bevel) {
+// Rounded fillet to match the top's, applied to the top outer edge of the
+// tray's long side walls -- only the exterior-facing surface rounds off;
+// the interior (cavity/skirt-facing) surface stays flush so it doesn't
+// disturb the snap-fit tab or the skirt fit. A cylinder lying along the
+// wall's length, positioned so it's tangent to both the flat lower wall
+// and the flat inner cap -- true quarter-round, not a chamfer.
+module rounded_wall_low(length, thickness, height, r) {
   // exterior face at local Y=0
-  hull() {
-    cube([length, thickness, height - bevel]);
-    translate([0, bevel, height - bevel])
-      cube([length, thickness - bevel, bevel]);
+  union() {
+    cube([length, thickness, height - r]);
+    translate([0, r, height - r])
+      cube([length, thickness - r, r]);
+    translate([0, r, height - r])
+      rotate([0, 90, 0])
+        cylinder(r = r, h = length, $fn = 24);
   }
 }
-module beveled_wall_high(length, thickness, height, bevel) {
+module rounded_wall_high(length, thickness, height, r) {
   // exterior face at local Y=thickness
-  hull() {
-    cube([length, thickness, height - bevel]);
-    translate([0, 0, height - bevel])
-      cube([length, thickness - bevel, bevel]);
+  union() {
+    cube([length, thickness, height - r]);
+    translate([0, 0, height - r])
+      cube([length, thickness - r, r]);
+    translate([0, thickness - r, height - r])
+      rotate([0, 90, 0])
+        cylinder(r = r, h = length, $fn = 24);
   }
 }
 
@@ -250,11 +268,11 @@ module bottom_tray() {
     // floor
     cube([outer_w, outer_h, floor_t]);
     // long side walls, full tray height, spanning the whole length --
-    // bevel to match the top's, on the exterior-facing side only
+    // rounded fillet to match the top's, on the exterior-facing side only
     translate([0, 0, floor_t])
-      beveled_wall_low(outer_w, wall_t, tray_wall_h, top_bevel);
+      rounded_wall_low(outer_w, wall_t, tray_wall_h, top_fillet);
     translate([0, outer_h - wall_t, floor_t])
-      beveled_wall_high(outer_w, wall_t, tray_wall_h, top_bevel);
+      rounded_wall_high(outer_w, wall_t, tray_wall_h, top_fillet);
     // closed far-end wall
     translate([outer_w - wall_t, 0, floor_t])
       cube([wall_t, outer_h, tray_wall_h]);
@@ -334,14 +352,29 @@ module hook_post(hook_bot_z, ceiling_top_z) {
       }
 }
 
-// Flat-topped box with a 45-degree bevel around its top outer edge (all 4
-// sides): full size up to (t - bevel), then a hull() out to a top face
-// inset by "bevel" on every side, tapering the last "bevel" of height.
-module beveled_top(w, h, t, bevel) {
-  hull() {
-    cube([w, h, t - bevel]);
-    translate([bevel, bevel, t - bevel])
-      cube([w - 2 * bevel, h - 2 * bevel, bevel]);
+// Flat-topped box with a rounded fillet around its top outer edge (all 4
+// sides, including corners): flat-walled prism up to (t - r), capped
+// with a minkowski-rounded dome for the last r of height. The dome's
+// "equator" (at t - r) exactly matches the prism's own w x h cross
+// section along the straight edges (inset-then-expand-by-r nets out to
+// the original size), so the only visible seam is a slight softening
+// right at the 4 corners, where the dome is already rounding them off
+// but the prism below still has square corners.
+module rounded_top(w, h, t, r) {
+  union() {
+    linear_extrude(t - r)
+      square([w, h]);
+    translate([0, 0, t - r])
+      intersection() {
+        minkowski() {
+          translate([r, r, 0])
+            linear_extrude(0.02)
+              square([w - 2 * r, h - 2 * r]);
+          sphere(r = r, $fn = 24);
+        }
+        translate([-1, -1, 0])
+          cube([w + 2, h + 2, r + 1]);
+      }
   }
 }
 
@@ -357,9 +390,9 @@ module top_slide() {
   difference() {
     union() {
       // ceiling panel, spans the tray's full outer footprint, with a
-      // cosmetic bevel around the top outer edge
+      // cosmetic rounded fillet around the top outer edge
       translate([0, 0, ceiling_bot_z])
-        beveled_top(outer_w, outer_h, wall_t, top_bevel);
+        rounded_top(outer_w, outer_h, wall_t, top_fillet);
       // skirt walls, nested just inside the tray's long walls, each thinned
       // down to a flexible snap-fit tab at snap_x -- the matching ridge on
       // the tray wall protrudes past this tab's resting face, so the ridge
@@ -380,9 +413,9 @@ module top_slide() {
       // leading-edge wall: picks up exactly where the tray's fixed stub
       // wall stops (end_wall_top_z) and covers up to the ceiling's own
       // underside (NOT ceiling_top_z) -- stopping there, rather than
-      // overlapping the ceiling's own bevel zone, lets the ceiling's
-      // 45-degree edge taper show through on this short side too instead
-      // of being filled back in flat by this wall
+      // overlapping the ceiling's own fillet zone, lets the ceiling's
+      // rounded edge show through on this short side too instead of
+      // being filled back in flat by this wall
       translate([0, 0, end_wall_top_z])
         cube([wall_t, outer_h, ceiling_bot_z - end_wall_top_z]);
       // retention hooks, one per mounting pin
@@ -398,19 +431,23 @@ module top_slide() {
       cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
     // wave/ripple texture + integrated vent slots
     wave_texture(ceiling_top_z);
-    // cable slot through the leading-edge wall, open at the wall's own
-    // bottom edge (end_wall_top_z, where the tray's stub wall stops) --
-    // a fully closed hole would mean threading the whole cable
-    // (including whatever's on its far end) through before the top could
-    // even be dropped on. This way the cable gets plugged into the board
-    // first, then the top drops into place around it. Straight sides
-    // down to the wall's bottom, rounded off at the top where the cable
-    // actually rests.
-    translate([-0.5, board_origin[1] + usb_hole_y - usb_hole_d / 2, end_wall_top_z])
-      cube([wall_t + 1, usb_hole_d, (skirt_bot_z + usb_hole_z_above_board) - end_wall_top_z]);
-    translate([-0.5, board_origin[1] + usb_hole_y, skirt_bot_z + usb_hole_z_above_board])
-      rotate([0, 90, 0])
-        cylinder(d = usb_hole_d, h = wall_t + 1);
+    // Recessed USB-C port through the leading-edge wall: a shallow surface
+    // recess (exterior face only, not through) surrounds a smaller
+    // through-opening, giving a stepped-in receptacle look rather than a
+    // flush slot. There's no cable to thread through assembly anymore --
+    // this assumes the board's own onboard USB-C connector sits right
+    // here and gets plugged into from outside after the case is closed --
+    // but every dimension is still a guess (see usb_port_* above).
+    translate([-0.5,
+               board_origin[1] + usb_port_y - usb_port_w / 2,
+               skirt_bot_z + usb_port_z_above_board - usb_port_h / 2])
+      cube([wall_t + 1, usb_port_w, usb_port_h]);
+    translate([-0.5,
+               board_origin[1] + usb_port_y - usb_port_w / 2 - usb_port_recess_margin,
+               skirt_bot_z + usb_port_z_above_board - usb_port_h / 2 - usb_port_recess_margin])
+      cube([usb_port_recess_depth + 0.5,
+            usb_port_w + 2 * usb_port_recess_margin,
+            usb_port_h + 2 * usb_port_recess_margin]);
   }
 }
 
