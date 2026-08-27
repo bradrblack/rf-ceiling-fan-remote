@@ -99,16 +99,19 @@ button_tube_gap_above_board = 2;    // gap between the tube's open bottom
 top_bevel = 1.2;
 
 // No external LED -- the onboard LED (GPIO8/GND) shows through the vent
-// holes in the ceiling instead of needing its own dedicated hole.
-// Ventilation: small dot grid across the ceiling, skipped near the button
-// tunnel so nothing merges awkwardly close together.
-vent_hole_d = 2;
-vent_spacing = 6;      // grid pitch
-vent_margin = 6;       // dots stay at LEAST this far from the outer edge --
-                         // the grid is centered on the ceiling, so the actual
-                         // margin is whatever's left over after fitting as
-                         // many rows/columns as possible at this spacing
-vent_exclude_r = 6;    // skip any dot this close to the button tunnel
+// slots in the ceiling instead of needing its own dedicated hole.
+// Ventilation: a parametric wave/ripple texture across the ceiling --
+// shallow parallel grooves (cosmetic only, don't cut through) with a
+// narrow through-slot at each groove's low point for actual airflow.
+// A regular, repeating approximation of an organic flow pattern, not a
+// mesh-sculpted match to one -- OpenSCAD's CSG modeling doesn't really
+// do freeform organic surfaces directly.
+wave_spacing = 10;       // distance between groove centers
+wave_amplitude = 0.6;   // how deep each groove cuts into the top surface -- subtle
+wave_r = 15;               // groove cylinder radius (bigger = shallower/wider groove)
+slot_w = 1.6;               // vent slot width
+slot_margin = 6;         // keep slots/grooves at least this far from the outer edge
+vent_exclude_r = 6;      // skip/split a slot this close to the button tunnel
 
 // Alignment pins (replace the old screw bosses) + PCB retention washers.
 // UNVALIDATED -- these are first-pass guesses for a friction/clearance fit
@@ -275,24 +278,44 @@ module bottom_tray() {
   }
 }
 
-// Grid is centered on the ceiling (equal leftover margin on every side),
-// not just started at vent_margin and run until it stops fitting -- fits
-// as many full rows/columns as possible at vent_spacing, at least
-// vent_margin from the edge.
-module vent_holes(ceiling_z) {
-  btn_pos = [board_origin[0] + button_hole_x, board_origin[1] + button_hole_y];
-  n_cols = floor((outer_w - 2 * vent_margin) / vent_spacing) + 1;
-  n_rows = floor((outer_h - 2 * vent_margin) / vent_spacing) + 1;
-  x0 = (outer_w - (n_cols - 1) * vent_spacing) / 2;
-  y0 = (outer_h - (n_rows - 1) * vent_spacing) / 2;
-  for (i = [0 : n_cols - 1])
-    for (j = [0 : n_rows - 1]) {
-      x = x0 + i * vent_spacing;
-      y = y0 + j * vent_spacing;
-      if (norm([x, y] - btn_pos) > vent_exclude_r)
-        translate([x, y, ceiling_z - 0.5])
-          cylinder(d = vent_hole_d, h = wall_t + 1);
+// One vent slot: a rounded-rectangle (capsule) through-cut from y_lo to
+// y_hi at a fixed X, full ceiling thickness.
+module vent_slot(x, y_lo, y_hi) {
+  translate([x, 0, ceiling_bot_z - 0.5])
+    hull() {
+      translate([0, y_lo, 0]) cylinder(d = slot_w, h = wall_t + 1);
+      translate([0, y_hi, 0]) cylinder(d = slot_w, h = wall_t + 1);
     }
+}
+
+// Wave/ripple texture: shallow parallel grooves (cosmetic, don't cut
+// through) spanning the ceiling's full width, repeating along its length
+// at wave_spacing, centered with equal margin on both ends. Each groove
+// gets a vent_slot() at its low point (X), split into two segments around
+// the button tunnel if a groove happens to land close to it.
+module wave_texture(ceiling_top_z) {
+  btn_pos = [board_origin[0] + button_hole_x, board_origin[1] + button_hole_y];
+  n = floor((outer_w - 2 * slot_margin) / wave_spacing) + 1;
+  x0 = (outer_w - (n - 1) * wave_spacing) / 2;
+  y_lo = slot_margin;
+  y_hi = outer_h - slot_margin;
+  for (i = [0 : n - 1]) {
+    x = x0 + i * wave_spacing;
+    // shallow cosmetic groove across the full width -- a large-radius
+    // cylinder lying along Y, sunk into the top surface by wave_amplitude
+    translate([x, -1, ceiling_top_z + wave_r - wave_amplitude])
+      rotate([-90, 0, 0])
+        cylinder(r = wave_r, h = outer_h + 2);
+    // vent slot at this groove's low point
+    if (abs(x - btn_pos[0]) < vent_exclude_r) {
+      if (btn_pos[1] - vent_exclude_r > y_lo + slot_w)
+        vent_slot(x, y_lo, btn_pos[1] - vent_exclude_r);
+      if (btn_pos[1] + vent_exclude_r < y_hi - slot_w)
+        vent_slot(x, btn_pos[1] + vent_exclude_r, y_hi);
+    } else {
+      vent_slot(x, y_lo, y_hi);
+    }
+  }
 }
 
 // One PCB retention washer, built at the local origin (XY centered on a
@@ -373,8 +396,8 @@ module top_slide() {
     // reset button bore, straight through the guide tube and the ceiling
     translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z - 0.5])
       cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
-    // ventilation dot grid
-    vent_holes(ceiling_bot_z);
+    // wave/ripple texture + integrated vent slots
+    wave_texture(ceiling_top_z);
     // cable slot through the leading-edge wall, open at the wall's own
     // bottom edge (end_wall_top_z, where the tray's stub wall stops) --
     // a fully closed hole would mean threading the whole cable
