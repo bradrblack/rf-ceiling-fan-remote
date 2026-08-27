@@ -66,24 +66,29 @@ usb_hole_z_above_board = 3.7; // port center height above the board's top surfac
                                 // port's bottom edge exactly on the wall's own bottom face and
                                 // produced a non-manifold cut)
 
-// Reset-button poke-hole tunnel: button is top-mounted (pressed straight
-// down) -- vertical hole through the top piece's ceiling. Position is a
-// rough estimate (typical Super Minis cluster it near the USB-C edge) --
-// check against your actual module and adjust before printing.
-button_hole_d = 3;      // fits a toothpick/paperclip/pin
+// Reset-button guide tunnel: button is top-mounted (pressed straight
+// down). A tube hangs from the ceiling down toward the board, so a
+// toothpick/pin is guided straight to the button instead of just poking
+// through a thin hole in the ceiling with nothing below to aim it.
+// Position is a rough estimate (typical Super Minis cluster it near the
+// USB-C edge) -- check against your actual module and adjust before
+// printing, along with button_tube_gap_above_board below.
+button_hole_d = 3;      // bore diameter -- fits a toothpick/paperclip/pin
 button_hole_x = 8;      // local X, near the left/USB edge
 button_hole_y = 20;     // local Y -- left side when facing the USB port
+button_tube_wall = 1;                // tube wall thickness
+button_tube_gap_above_board = 2;    // gap between the tube's open bottom
+                                       // and the board's top surface -- guess,
+                                       // verify against actual button height
 
-// External LED, mounted on the top piece's ceiling, wired in parallel to
-// the onboard LED (GPIO8/GND) with its own leads -- no firmware change needed.
-led_hole_d = 5;          // standard 5mm through-hole LED
-
-// Ventilation: small dot grid across the ceiling, skipped near the LED
-// and button holes so nothing merges awkwardly close together.
+// No external LED -- the onboard LED (GPIO8/GND) shows through the vent
+// holes in the ceiling instead of needing its own dedicated hole.
+// Ventilation: small dot grid across the ceiling, skipped near the button
+// tunnel so nothing merges awkwardly close together.
 vent_hole_d = 2;
 vent_spacing = 6;      // grid pitch
 vent_margin = 8;       // keep dots this far from the outer edge
-vent_exclude_r = 6;    // skip any dot this close to the LED/button holes
+vent_exclude_r = 6;    // skip any dot this close to the button tunnel
 
 // Alignment pins (replace the old screw bosses) + sliding retention hooks.
 // UNVALIDATED -- these are first-pass guesses for a friction/clearance fit
@@ -126,6 +131,8 @@ ceiling_bot_z = floor_t + tray_wall_h;
 ceiling_top_z = ceiling_bot_z + wall_t;
 rail_z_lo = skirt_bot_z + (ceiling_bot_z - skirt_bot_z) / 2 - rail_h / 2; // rail vertically centered
                                                                             // in the skirt engagement zone
+button_tube_od = button_hole_d + 2 * button_tube_wall;
+button_tube_bot_z = skirt_bot_z + button_tube_gap_above_board;
 
 // Board-local -> case-local (board sits centered in the cavity, offset by
 // wall_t + board_margin from the case's own bottom-left corner)
@@ -174,11 +181,10 @@ module bottom_tray() {
 }
 
 module vent_holes(ceiling_z) {
-  led_pos = [outer_w / 2, outer_h / 2];
   btn_pos = [board_origin[0] + button_hole_x, board_origin[1] + button_hole_y];
   for (x = [vent_margin : vent_spacing : outer_w - vent_margin])
     for (y = [vent_margin : vent_spacing : outer_h - vent_margin])
-      if (norm([x, y] - led_pos) > vent_exclude_r && norm([x, y] - btn_pos) > vent_exclude_r)
+      if (norm([x, y] - btn_pos) > vent_exclude_r)
         translate([x, y, ceiling_z - 0.5])
           cylinder(d = vent_hole_d, h = wall_t + 1);
 }
@@ -227,13 +233,14 @@ module top_slide() {
       // retention hooks, one per mounting pin
       mount_hole_positions()
         hook_post(hook_bot_z, ceiling_top_z);
+      // reset-button guide tube, hanging from the ceiling down toward the
+      // board (overlaps into the ceiling itself for a clean union)
+      translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z])
+        cylinder(d = button_tube_od, h = ceiling_top_z - button_tube_bot_z);
     }
-    // external LED hole
-    translate([outer_w / 2, outer_h / 2, ceiling_bot_z - 0.5])
-      cylinder(d = led_hole_d, h = wall_t + 1);
-    // reset button poke-hole tunnel
-    translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, ceiling_bot_z - 0.5])
-      cylinder(d = button_hole_d, h = wall_t + 1);
+    // reset button bore, straight through the guide tube and the ceiling
+    translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z - 0.5])
+      cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
     // ventilation dot grid
     vent_holes(ceiling_bot_z);
     // cable port through the leading-edge wall
