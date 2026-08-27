@@ -7,25 +7,31 @@
 // verify against your actual modules before printing, especially
 // button_hole_x/y and the pin/hook dimensions (test-fit before committing).
 //
-// Assembly: no screws. The PCB sits on 4 pads and is located by pins that
-// poke up through its mounting holes. The top piece slides in lengthwise
-// from the open (cable) end and nests INSIDE the tray's own side walls,
-// stopping against the tray's closed far-end wall. As it slides home, a
-// keyhole-slotted hook post on the underside of the top catches each pin
-// and holds the PCB down against its pad -- no separate parts, and it's
-// still removable by sliding the top back out. A rail along each of the
-// tray's long walls engages a matching groove in the top's skirts, so the
-// top itself can't be lifted straight off the tray either -- it only
-// comes off by sliding back out the way it went in. The tray's open
-// (cable) end has a short fixed stub wall covering its bottom third; the
-// top's leading wall picks up right where that stops and covers the
-// rest, closing off the whole opening between them except for a slot
-// sized to the cable itself.
+// Assembly: no screws hold the PCB itself. The PCB sits on 4 pads and is
+// located by pins that poke up through its mounting holes. The top piece
+// slides in lengthwise from the open (cable) end and nests INSIDE the
+// tray's own side walls, stopping against the tray's closed far-end wall.
+// As it slides home, a keyhole-slotted hook post on the underside of the
+// top catches each pin and holds the PCB down against its pad -- no
+// separate parts, and it's still removable by sliding the top back out. A
+// rail along each of the tray's long walls engages a matching groove in
+// the top's skirts, so the top itself can't be lifted straight off the
+// tray either -- it only comes off by sliding back out. One M3 locking
+// screw goes through the tray floor (recessed counterbore on the
+// underside) into a blind boss on the top, past the closed far end of the
+// board, to stop it from sliding back open once everything's seated. The
+// tray's open (cable) end has a short fixed stub wall covering its bottom
+// third; the top's leading wall picks up right where that stops and
+// covers the rest, closing off the whole opening between them except for
+// a slot sized to the cable itself. Both the top's outer edge and the
+// tray's long walls carry a matching cosmetic bevel where they meet.
 //
 // Render in OpenSCAD, or from the command line:
 //   openscad -o tray.stl   -D 'part="tray"' fan_dongle_case.scad
 //   openscad -o top.stl    -D 'part="top"'  fan_dongle_case.scad
 //   openscad -o preview.png -D 'part="both"' --imgsize=1200,900 --camera=34,12,10,55,0,25,220 fan_dongle_case.scad
+//   openscad -o fit.png     -D 'part="fit"'  --imgsize=1200,900 --camera=34,12,10,55,0,25,220 fan_dongle_case.scad
+//     ("fit" = tray + a translucent PCB/module reference, no top -- for checking fit; not a real part)
 
 // ==========================================
 // MEASURED -- from hw/pcb.py, local origin at board bottom-left corner
@@ -123,6 +129,21 @@ rail_clearance = 0.3;      // clearance around the rail inside the groove
 // once assembled -- rather than the top being the only thing closing it.
 end_wall_frac = 1 / 3;
 
+// Locking screw: the rail/groove stops the top lifting straight up, but
+// nothing stops it sliding back out -- this adds a screw straight down
+// through the tray floor, past the closed (far) end of the board, into a
+// blind boss hanging from the top's ceiling there. Recessed counterbore
+// on the floor's underside so the head doesn't protrude. far_end_extra
+// stretches the case a bit past the board's far edge so there's room for
+// the boss clear of both the board and the end wall.
+far_end_extra = 10;
+lock_screw_clearance_d = 3.2;      // M3 clearance
+lock_screw_counterbore_d = 6;       // recess for the screw head
+lock_screw_counterbore_depth = 2.2;
+lock_screw_pilot_d = 2.5;           // self-tap pilot into the boss
+lock_screw_pilot_depth = 8;
+lock_screw_boss_od = 7;
+
 // ==========================================
 // Case construction parameters
 // ==========================================
@@ -136,7 +157,7 @@ fit_clearance = 0.3;     // FDM friction/slide clearance
 // Derived
 cavity_w = board_w + 2 * board_margin;
 cavity_h = board_h + 2 * board_margin;
-outer_w = cavity_w + 2 * wall_t;
+outer_w = cavity_w + 2 * wall_t + far_end_extra;
 outer_h = cavity_h + 2 * wall_t;
 tray_wall_h = standoff_h + board_t + component_clearance; // floor-top to ceiling-bottom
 skirt_bot_z = floor_t + standoff_h + board_t; // where the top's skirts/leading wall start, just above the board
@@ -154,6 +175,32 @@ board_origin = [wall_t + board_margin, wall_t + board_margin];
 
 function b2c(p) = [p[0] + board_origin[0], p[1] + board_origin[1]];
 
+// centered in the far_end_extra gap between the board's far edge and the
+// tray's closed far wall
+lock_screw_x = board_origin[0] + board_w + far_end_extra / 2;
+lock_screw_y = outer_h / 2;
+
+// Bevel to match the top's, applied to the top outer edge of the tray's
+// long side walls -- only the exterior-facing surface tapers; the
+// interior (cavity/skirt-facing) surface stays flush so it doesn't
+// disturb the rail or the skirt fit.
+module beveled_wall_low(length, thickness, height, bevel) {
+  // exterior face at local Y=0
+  hull() {
+    cube([length, thickness, height - bevel]);
+    translate([0, bevel, height - bevel])
+      cube([length, thickness - bevel, bevel]);
+  }
+}
+module beveled_wall_high(length, thickness, height, bevel) {
+  // exterior face at local Y=thickness
+  hull() {
+    cube([length, thickness, height - bevel]);
+    translate([0, 0, height - bevel])
+      cube([length, thickness - bevel, bevel]);
+  }
+}
+
 $fn = 48; // smooth cylinders
 
 part = "both"; // overridden via -D 'part="tray"' / "top" / "both" for preview
@@ -166,38 +213,48 @@ module mount_hole_positions() {
 // (at X=outer_w). The near end (X=0, cable side) is open, both for the
 // top piece to slide in from and for the cable itself to exit through.
 module bottom_tray() {
-  union() {
-    // floor
-    cube([outer_w, outer_h, floor_t]);
-    // long side walls, full tray height, spanning the whole length
-    translate([0, 0, floor_t])
-      cube([outer_w, wall_t, tray_wall_h]);
-    translate([0, outer_h - wall_t, floor_t])
-      cube([outer_w, wall_t, tray_wall_h]);
-    // closed far-end wall -- the slide's hard stop
-    translate([outer_w - wall_t, 0, floor_t])
-      cube([wall_t, outer_h, tray_wall_h]);
-    // near-end stub wall -- fixed, doesn't slide, closes the bottom
-    // end_wall_frac of the open (cable) end. The top's leading wall picks
-    // up right where this stops (see top_slide()), so the two don't
-    // occupy the same space -- the top would have nowhere to slide into
-    // if this reached as high as the top's own leading wall does.
-    translate([0, 0, floor_t])
-      cube([wall_t, outer_h, end_wall_top_z - floor_t]);
-    // retention rails, full length, engaging the top's skirt grooves so
-    // the top can't be lifted straight up once slid into place
-    translate([0, wall_t, rail_z_lo])
-      cube([outer_w, rail_protrusion, rail_h]);
-    translate([0, outer_h - wall_t - rail_protrusion, rail_z_lo])
-      cube([outer_w, rail_protrusion, rail_h]);
-    // 4 mounting pads with alignment pins on top
-    mount_hole_positions()
-      union() {
-        translate([0, 0, floor_t])
-          cylinder(d = boss_d, h = standoff_h);
-        translate([0, 0, floor_t + standoff_h])
-          cylinder(d = pin_d, h = pin_h);
-      }
+  difference() {
+    union() {
+      // floor
+      cube([outer_w, outer_h, floor_t]);
+      // long side walls, full tray height, spanning the whole length --
+      // bevel to match the top's, on the exterior-facing side only
+      translate([0, 0, floor_t])
+        beveled_wall_low(outer_w, wall_t, tray_wall_h, top_bevel);
+      translate([0, outer_h - wall_t, floor_t])
+        beveled_wall_high(outer_w, wall_t, tray_wall_h, top_bevel);
+      // closed far-end wall -- the slide's hard stop
+      translate([outer_w - wall_t, 0, floor_t])
+        cube([wall_t, outer_h, tray_wall_h]);
+      // near-end stub wall -- fixed, doesn't slide, closes the bottom
+      // end_wall_frac of the open (cable) end. The top's leading wall picks
+      // up right where this stops (see top_slide()), so the two don't
+      // occupy the same space -- the top would have nowhere to slide into
+      // if this reached as high as the top's own leading wall does.
+      translate([0, 0, floor_t])
+        cube([wall_t, outer_h, end_wall_top_z - floor_t]);
+      // retention rails, full length, engaging the top's skirt grooves so
+      // the top can't be lifted straight up once slid into place
+      translate([0, wall_t, rail_z_lo])
+        cube([outer_w, rail_protrusion, rail_h]);
+      translate([0, outer_h - wall_t - rail_protrusion, rail_z_lo])
+        cube([outer_w, rail_protrusion, rail_h]);
+      // 4 mounting pads with alignment pins on top
+      mount_hole_positions()
+        union() {
+          translate([0, 0, floor_t])
+            cylinder(d = boss_d, h = standoff_h);
+          translate([0, 0, floor_t + standoff_h])
+            cylinder(d = pin_d, h = pin_h);
+        }
+    }
+    // locking screw: clearance hole through the floor, with a recessed
+    // counterbore on the underside so the head sits flush/below the
+    // bottom surface
+    translate([lock_screw_x, lock_screw_y, -0.5])
+      cylinder(d = lock_screw_clearance_d, h = floor_t + 1);
+    translate([lock_screw_x, lock_screw_y, -0.5])
+      cylinder(d = lock_screw_counterbore_d, h = lock_screw_counterbore_depth + 0.5);
   }
 }
 
@@ -273,10 +330,19 @@ module top_slide() {
       // board (overlaps into the ceiling itself for a clean union)
       translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z])
         cylinder(d = button_tube_od, h = ceiling_top_z - button_tube_bot_z);
+      // locking screw boss, hanging from the ceiling down near the floor
+      // (leaves a little clearance below so it can't bottom out against
+      // the floor before the two halves are fully seated)
+      translate([lock_screw_x, lock_screw_y, floor_t + 1])
+        cylinder(d = lock_screw_boss_od, h = ceiling_top_z - (floor_t + 1));
     }
     // reset button bore, straight through the guide tube and the ceiling
     translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z - 0.5])
       cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
+    // locking screw's self-tap pilot hole, blind -- doesn't reach the
+    // ceiling's top surface, so the screw can't be over-driven through it
+    translate([lock_screw_x, lock_screw_y, floor_t + 1 - 0.5])
+      cylinder(d = lock_screw_pilot_d, h = lock_screw_pilot_depth + 0.5);
     // ventilation dot grid
     vent_holes(ceiling_bot_z);
     // cable slot through the leading-edge wall, open at the wall's own
@@ -303,12 +369,40 @@ module top_slide() {
   }
 }
 
+// Rough visual fit-check only -- NOT a real component model and not part
+// of either printable piece (only shown in the "both" preview, never
+// under "tray"/"top"). PCB outline/position/mounting holes are measured
+// (see hw/pcb.py); module heights above the board are unmeasured guesses
+// -- update once the real modules are in hand.
+module board_reference() {
+  color("green", 0.5)
+    translate([board_origin[0], board_origin[1], floor_t + standoff_h])
+      cube([board_w, board_h, board_t]);
+  color("orange", 0.5)
+    translate([board_origin[0] + esp32_center[0] - esp32_outline[0] / 2,
+                board_origin[1] + esp32_center[1] - esp32_outline[1] / 2,
+                floor_t + standoff_h + board_t])
+      cube([esp32_outline[0], esp32_outline[1], 4]); // height: unmeasured guess
+  color("red", 0.5)
+    translate([board_origin[0] + cc1101_center[0] - cc1101_outline[0] / 2,
+                board_origin[1] + cc1101_center[1] - cc1101_outline[1] / 2,
+                floor_t + standoff_h + board_t])
+      cube([cc1101_outline[0], cc1101_outline[1], 5]); // height: unmeasured guess
+}
+
 if (part == "tray") {
   bottom_tray();
 } else if (part == "top") {
   translate([0, outer_h + 10, 0])
     top_slide();
+} else if (part == "fit") {
+  // tray + PCB reference only, no top -- the top is opaque and would
+  // hide the board from any outside camera angle, so this is the view
+  // that actually shows how the board sits in the tray
+  bottom_tray();
+  board_reference();
 } else {
   bottom_tray();
   top_slide();
+  board_reference();
 }
