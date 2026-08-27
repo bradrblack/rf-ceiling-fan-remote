@@ -77,11 +77,14 @@ usb_hole_z_above_board = 3.7; // port center height above the board's top surfac
 // printing, along with button_tube_gap_above_board below.
 button_hole_d = 3;      // bore diameter -- fits a toothpick/paperclip/pin
 button_hole_x = 8;      // local X, near the left/USB edge
-button_hole_y = 20;     // local Y -- left side when facing the USB port
+button_hole_y = 4;      // local Y -- right side when facing the USB port
 button_tube_wall = 1;                // tube wall thickness
 button_tube_gap_above_board = 2;    // gap between the tube's open bottom
                                        // and the board's top surface -- guess,
                                        // verify against actual button height
+
+// Cosmetic 45-degree bevel around the top face's outer edge (all 4 sides).
+top_bevel = 1.2;
 
 // No external LED -- the onboard LED (GPIO8/GND) shows through the vent
 // holes in the ceiling instead of needing its own dedicated hole.
@@ -225,6 +228,17 @@ module hook_post(hook_bot_z, ceiling_top_z) {
       }
 }
 
+// Flat-topped box with a 45-degree bevel around its top outer edge (all 4
+// sides): full size up to (t - bevel), then a hull() out to a top face
+// inset by "bevel" on every side, tapering the last "bevel" of height.
+module beveled_top(w, h, t, bevel) {
+  hull() {
+    cube([w, h, t - bevel]);
+    translate([bevel, bevel, t - bevel])
+      cube([w - 2 * bevel, h - 2 * bevel, bevel]);
+  }
+}
+
 // Ceiling + 2 skirt walls, nested just inside the tray's long walls with
 // fit_clearance, plus a hook_post() over each pin and a leading-edge wall
 // that closes off the open (cable) end down to a small round port. Built
@@ -236,9 +250,10 @@ module top_slide() {
 
   difference() {
     union() {
-      // ceiling panel, spans the tray's full outer footprint
+      // ceiling panel, spans the tray's full outer footprint, with a
+      // cosmetic bevel around the top outer edge
       translate([0, 0, ceiling_bot_z])
-        cube([outer_w, outer_h, wall_t]);
+        beveled_top(outer_w, outer_h, wall_t, top_bevel);
       // skirt walls, nested just inside the tray's long walls
       translate([0, wall_t + fit_clearance, skirt_bot_z])
         cube([outer_w, wall_t, ceiling_bot_z - skirt_bot_z]);
