@@ -243,7 +243,15 @@ module top_slide() {
       cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
     // ventilation dot grid
     vent_holes(ceiling_bot_z);
-    // cable port through the leading-edge wall
+    // cable slot through the leading-edge wall, open at the wall's bottom
+    // edge -- a fully closed hole would mean threading the whole cable
+    // (including whatever's on its far end) through before the top could
+    // even start sliding on. This way the cable gets plugged into the
+    // board first, then the top slides into place around it. Straight
+    // sides down to the floor, rounded off at the top where the cable
+    // actually rests.
+    translate([-0.5, board_origin[1] + usb_hole_y - usb_hole_d / 2, floor_t])
+      cube([wall_t + 1, usb_hole_d, (skirt_bot_z + usb_hole_z_above_board) - floor_t]);
     translate([-0.5, board_origin[1] + usb_hole_y, skirt_bot_z + usb_hole_z_above_board])
       rotate([0, 90, 0])
         cylinder(d = usb_hole_d, h = wall_t + 1);
