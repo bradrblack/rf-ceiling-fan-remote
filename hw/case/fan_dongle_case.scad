@@ -240,11 +240,14 @@ module top_slide() {
     translate([-0.5, board_origin[1] + usb_hole_y, skirt_bot_z + usb_hole_z_above_board])
       rotate([0, 90, 0])
         cylinder(d = usb_hole_d, h = wall_t + 1);
-    // grooves matching the tray's retention rails
-    translate([-1, wall_t - 1, rail_z_lo - rail_clearance])
-      cube([outer_w + 2, rail_protrusion + rail_clearance + 1.5, rail_h + 2 * rail_clearance]);
-    translate([-1, outer_h - wall_t - rail_protrusion - rail_clearance - 1.5, rail_z_lo - rail_clearance])
-      cube([outer_w + 2, rail_protrusion + rail_clearance + 1.5, rail_h + 2 * rail_clearance]);
+    // grooves matching the tray's retention rails -- sized to just clear
+    // the rail (rail_protrusion + rail_clearance deep), not padded out
+    // further, so the skirt (wall_t = 2mm thick) keeps solid material
+    // behind the groove instead of being cut through
+    translate([-1, wall_t, rail_z_lo - rail_clearance])
+      cube([outer_w + 2, rail_protrusion + rail_clearance, rail_h + 2 * rail_clearance]);
+    translate([-1, outer_h - wall_t - rail_protrusion - rail_clearance, rail_z_lo - rail_clearance])
+      cube([outer_w + 2, rail_protrusion + rail_clearance, rail_h + 2 * rail_clearance]);
   }
 }
 
