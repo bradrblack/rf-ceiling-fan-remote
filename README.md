@@ -1,5 +1,5 @@
-<img src="./image.jpg" alt="ESP32 and CC1101" width="800" alt="Thanks to Chris Butler for 3D printing!">
-<img src="./image2.jpg" alt="ESP32 and CC1101" width="800" alt="Thanks to Chris Butler for 3D printing!">
+<img src="./image.jpg" alt="ESP32 and CC1101" width="800" alt="Thanks to Chris Butler for 3D printing!"/>
+<img src="./image2.jpg" alt="ESP32 and CC1101" width="800" alt="Thanks to Chris Butler for 3D printing!"/>
 
 # rf-ceiling-fan-remote
 
