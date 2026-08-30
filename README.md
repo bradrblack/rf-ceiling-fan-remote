@@ -1,5 +1,5 @@
-<img src="./image.jpg" alt="ESP32 and CC1101" height="200">
-<img src="./image2.jpg" alt="ESP32 and CC1101" height="200">
+<img src="./image.jpg" alt="ESP32 and CC1101" width="800">
+<img src="./image2.jpg" alt="ESP32 and CC1101" width="800">
 
 # rf-ceiling-fan-remote
 
