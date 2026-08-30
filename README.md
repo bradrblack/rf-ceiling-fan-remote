@@ -126,3 +126,8 @@ If you're deploying this outside US Eastern, update `TZ_STRING` in `fan_control.
 Since these self-healing reboots would otherwise happen silently, the reason for each one is written to flash (NVS) right before restarting, then read back and pushed as a [ntfy.sh](https://ntfy.sh) notification once WiFi reconnects on the next boot — so a device that's rebooting every 10 minutes shows up as a stream of pushes on your phone instead of going unnoticed. A normal manual power cycle leaves no reason behind, so it stays quiet.
 
 To enable it: pick a random, unguessable topic name (ntfy topics are unauthenticated — anyone who knows the exact name can read the notifications), set it as `NTFY_TOPIC` in `secrets.h`, and subscribe to that same topic in the [ntfy app](https://ntfy.sh/app) (iOS/Android) or web app.
+
+
+### Acknowledgements
+
+Thanks to Chris Butler for 3D printing the first case prototype!
