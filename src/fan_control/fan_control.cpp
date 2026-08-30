@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <esp_system.h>
+#include <esp_wifi.h>
 #include <esp32c3/rom/rtc.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
@@ -382,6 +383,17 @@ void setupWiFi() {
   logf("[WiFi]: Connecting");
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
+  // Cap TX power before connecting -- confirmed fix (on the same board
+  // hardware, in the public/test build) for an ESP32-C3 SuperMini issue
+  // where full TX power (~19.5dBm peak) browns out the board's onboard
+  // regulator during transmit bursts, causing intermittent connect
+  // failures. WiFi.mode(WIFI_STA) just ensures the underlying esp_wifi
+  // driver is initialized before this call has something to act on.
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_max_tx_power(60); // 60 x 0.25dBm = 15dBm, down from ~19.5dBm peak
+                                    // (was 40 = 10dBm, confirmed working on the
+                                    // public/test build -- raised for more range
+                                    // margin, trading back some regulator headroom)
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   unsigned long start = millis();
@@ -401,6 +413,18 @@ void setupWiFi() {
 }
 
 void setupTime() {
+  // Re-kick the SNTP client now that WiFi is actually up. configTzTime()
+  // was already called once at the very top of setup(), before WiFi
+  // connects -- that early call is there so the TZ is set before any
+  // logging happens (see its own comment), but it also starts the SNTP
+  // client's very first sync attempt with no network available yet. That
+  // attempt fails and the client backs off, so the poll loop below can
+  // end up waiting out its whole 10s window before the client's next
+  // background retry ever fires, even though the network is fine by
+  // then. Calling configTzTime() again here restarts the SNTP client's
+  // sync cycle with WiFi already connected, so this poll actually has a
+  // sync attempt to catch.
+  configTzTime(TZ_STRING, NTP_SERVER);
   logf("[NTP]: Syncing time");
   time_t now = time(nullptr);
   unsigned long start = millis();
@@ -539,7 +563,7 @@ void setupSinricPro() {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(2000);
   Serial.println();
   Serial.println(BANNER);
 

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <esp_system.h>
+#include <esp_wifi.h>
 #include <esp32c3/rom/rtc.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <RCSwitch.h>
@@ -130,9 +131,10 @@ time_t lastClockCheckTime = 0;
 // heap fragmentation from a long-running WebSocket/TLS/JSON connection.
 // POSIX TZ string (not a fixed UTC offset) so DST transitions are handled
 // automatically -- US Eastern: EST=UTC-5, switches to EDT=UTC-4 on the
-// 2nd Sunday of March and back on the 1st Sunday of November. Change this
-// if you're outside US Eastern.
-#define TZ_STRING        "EST5EDT,M3.2.0,M11.1.0/2"
+// 2nd Sunday of March and back on the 1st Sunday of November. Configurable
+// in the setup portal (see tzString below) like the other per-device
+// fields; this is just the value a fresh device starts with.
+#define DEFAULT_TZ_STRING "EST5EDT,M3.2.0,M11.1.0/2"
 #define REBOOT_HOUR      3
 const char* NTP_SERVER = "pool.ntp.org";
 int lastRebootDay = -1;
@@ -421,6 +423,11 @@ char dip1[8] = "off";
 char dip2[8] = "off";
 char dip3[8] = "off";
 char dip4[8] = "off";
+// POSIX TZ string (see DEFAULT_TZ_STRING above for the format/example).
+// Loaded once at the very top of setup(), before anything logs a
+// timestamp, and again -- possibly updated -- once the portal has run;
+// see the two configTzTime() calls in setup()/setupTime().
+char tzString[48] = DEFAULT_TZ_STRING;
 
 bool shouldSaveSinricConfig = false;
 void onSaveSinricConfig() { shouldSaveSinricConfig = true; }
@@ -436,6 +443,7 @@ void loadSinricConfig() {
   prefs.getString("dip2", dip2, sizeof(dip2));
   prefs.getString("dip3", dip3, sizeof(dip3));
   prefs.getString("dip4", dip4, sizeof(dip4));
+  prefs.getString("tz", tzString, sizeof(tzString));
   prefs.end();
 }
 
@@ -450,6 +458,7 @@ void saveSinricConfig() {
   prefs.putString("dip2", dip2);
   prefs.putString("dip3", dip3);
   prefs.putString("dip4", dip4);
+  prefs.putString("tz", tzString);
   prefs.end();
 }
 
@@ -485,6 +494,7 @@ void setupWiFiManager() {
   WiFiManagerParameter customDip2("dip2", "Remote DIP switch 2 (on/off)", dip2, sizeof(dip2));
   WiFiManagerParameter customDip3("dip3", "Remote DIP switch 3 (on/off)", dip3, sizeof(dip3));
   WiFiManagerParameter customDip4("dip4", "Remote DIP switch 4 (on/off)", dip4, sizeof(dip4));
+  WiFiManagerParameter customTz("tz", "Timezone (POSIX TZ string, e.g. EST5EDT,M3.2.0,M11.1.0/2)", tzString, sizeof(tzString));
 
   WiFiManager wm;
   wm.setTitle("Fan Controller");
@@ -498,6 +508,7 @@ void setupWiFiManager() {
   wm.addParameter(&customDip2);
   wm.addParameter(&customDip3);
   wm.addParameter(&customDip4);
+  wm.addParameter(&customTz);
   wm.setConfigPortalTimeout(WIFI_PORTAL_TIMEOUT_SEC);
 
   // Force a clean radio reset before autoConnect() decides whether to try
@@ -509,6 +520,22 @@ void setupWiFiManager() {
   // build's first setup attempt.
   WiFi.mode(WIFI_OFF);
   delay(200);
+
+  // Cap TX power before any connection attempt. Full power (~19.5dBm
+  // peak) can brown out this board's onboard voltage regulator during
+  // transmit bursts -- a known cause of intermittent WiFi connect
+  // failures on ESP32-C3 SuperMini boards. Grounding the floating
+  // GPIO21 pin didn't fix this board's connect issue, so trying this
+  // next. Setting mode to STA here (ahead of whatever mode autoConnect()
+  // itself switches to) is just to get the underlying esp_wifi driver
+  // initialized so this call has something to act on -- the power cap
+  // itself isn't tied to a particular mode and persists through
+  // whatever autoConnect() does afterward.
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_max_tx_power(60); // 60 x 0.25dBm = 15dBm, down from ~19.5dBm peak
+                                    // (was 40 = 10dBm, confirmed working -- raised
+                                    // for more range margin, trading back some of
+                                    // the regulator headroom that fixed it)
 
   // Must happen before autoConnect(), since that's what actually associates
   // and does the DHCP handshake (which is when the hostname gets sent).
@@ -541,6 +568,8 @@ void setupWiFiManager() {
   dip3[sizeof(dip3) - 1] = '\0';
   strncpy(dip4, customDip4.getValue(), sizeof(dip4) - 1);
   dip4[sizeof(dip4) - 1] = '\0';
+  strncpy(tzString, customTz.getValue(), sizeof(tzString) - 1);
+  tzString[sizeof(tzString) - 1] = '\0';
 
   if (shouldSaveSinricConfig) {
     saveSinricConfig();
@@ -601,6 +630,18 @@ void setupRadio() {
 }
 
 void setupTime() {
+  // Re-kick the SNTP client now that WiFi is actually up. configTzTime()
+  // was already called once at the very top of setup(), before WiFi
+  // connects -- that early call is there so the TZ is set before any
+  // logging happens (see its own comment), but it also starts the SNTP
+  // client's very first sync attempt with no network available yet. That
+  // attempt fails and the client backs off, so the poll loop below can
+  // end up waiting out its whole 10s window before the client's next
+  // background retry ever fires, even though the network is fine by
+  // then. Calling configTzTime() again here restarts the SNTP client's
+  // sync cycle with WiFi already connected, so this poll actually has a
+  // sync attempt to catch.
+  configTzTime(tzString, NTP_SERVER);
   logf("[NTP]: Syncing time");
   time_t now = time(nullptr);
   unsigned long start = millis();
@@ -698,7 +739,7 @@ void checkClockJump() {
   lastClockCheckTime = now;
 }
 
-// Reboots once per day at REBOOT_HOUR local time (see TZ_STRING above).
+// Reboots once per day at REBOOT_HOUR local time (see tzString above).
 void checkDailyReboot() {
   time_t now = time(nullptr);
   if (now < 100000) return; // NTP hasn't synced yet
@@ -739,16 +780,34 @@ void setupSinricPro() {
 }
 
 void setup() {
+  // GPIO21 is broken out on this board but unconnected -- floating near
+  // the antenna, it's a reported (if unconfirmed on this board) cause of
+  // ESP32-C3 SuperMini WiFi connect failures elsewhere. Tried alone on
+  // this board's actual touch-the-antenna-to-connect symptom and did NOT
+  // fix it -- the real fix was capping TX power, see setupWiFiManager().
+  // Left in as a harmless precaution (a defined pin state next to the
+  // antenna is still better than a floating one), not because it's
+  // doing the load-bearing work here.
+  pinMode(21, OUTPUT);
+  digitalWrite(21, LOW);
+
   Serial.begin(115200);
   delay(2000);
   Serial.println();
   Serial.println(BANNER);
 
-  // Set the timezone before any logging happens. The RTC survives a soft
-  // reset (only a real power loss clears it), so time() can already return
-  // a valid epoch at the very start of boot -- without the TZ set yet,
-  // early log lines would misinterpret that as UTC/GMT instead of EDT.
-  configTzTime(TZ_STRING, NTP_SERVER);
+  // Load the saved timezone (and the rest of the portal config, harmless
+  // to read this early -- it's a flash/Preferences read, no WiFi needed)
+  // and set it before any logging happens. The RTC survives a soft reset
+  // (only a real power loss clears it), so time() can already return a
+  // valid epoch at the very start of boot -- without the TZ set yet,
+  // early log lines would misinterpret that as UTC/GMT instead of local
+  // time. setupWiFiManager() reloads/re-saves this same config later
+  // (and may update tzString from the portal), which is fine -- this
+  // early load's only job is getting the TZ right for the first few log
+  // lines before that runs.
+  loadSinricConfig();
+  configTzTime(tzString, NTP_SERVER);
 
   logf("--- Fan/Light RF Controller (setup portal build) v%s ---", FIRMWARE_VERSION);
 
