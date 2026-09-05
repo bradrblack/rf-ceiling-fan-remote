@@ -1,26 +1,56 @@
 // ESP32-C3 + CC1101 dongle case
 // Companion to hw/esp32c3_cc1101_dongle.kicad_pcb
 //
-// Board/hole dimensions below are read directly from hw/pcb.py (MEASURED).
-// Component heights, the reset-button tunnel position, and the LED/cable
-// dimensions are ESTIMATES based on typical ESP32-C3 Super Mini layout --
-// verify against your actual modules before printing, especially
-// button_hole_x/y and the pin/hook dimensions (test-fit before committing).
+// Board/hole dimensions below are read directly from
+// hw/esp32c3_cc1101_dongle.kicad_pcb (MEASURED). Component heights, the
+// reset-button tunnel position, and the LED/cable dimensions are
+// ESTIMATES based on typical ESP32-C3 Super Mini layout -- verify against
+// your actual modules before printing, especially the near_holes'
+// position and the pin/hook dimensions (test-fit before committing).
 //
-// Assembly: no screws hold the PCB itself. The PCB sits on 4 pads and is
-// located by pins that poke up through its mounting holes. The top piece
-// drops straight down onto the tray (skirts nest inside the tray's own
-// walls with a snug fit_clearance) -- NOT a horizontal slide-in. A plain
-// washer-shaped hook post hangs from the ceiling over each pin, clearing
-// it on the way down and coming to rest just above the board once seated;
-// it holds the PCB down passively, the same way a washer under a screw
-// head does, simply because the rigid top above it isn't going anywhere.
-// That "isn't going anywhere" is doing real work: unlike a slide-to-lock
-// mechanism, a snug friction fit alone does not resist being pulled
-// straight back up, and a slotted/keyed hook can't either without either
-// colliding with the pin during any sideways lock motion or requiring a
-// wider-headed pin than this design uses (the geometry was checked both
-// ways). What actually keeps the case shut is a snap-fit latch: two
+// v1.2 (see hw-v1.1 tag for the prior geometry): the board's near/USB
+// edge was trimmed back flush with the ESP32 module's own edge, so the
+// module's onboard USB-C connector -- which already overhung its own
+// sub-board by ~1mm -- now overhangs the CARRIER board's edge too. The
+// leading wall's port opening shrank to match: it's sized to the bare
+// connector now, not a cable plug's shell, and the board sits close
+// enough to that wall (near_end_clearance, not the full board_margin)
+// that the connector ends up embedded in the wall's own thickness rather
+// than clear of it. Six mounting holes now split into three roles
+// (far_holes, middle_holes, near_holes -- see their own comments up top)
+// instead of one uniform set of four.
+//
+// Assembly changed along with that: a tight port opening around an
+// embedded connector can't be dropped straight down over an
+// already-seated board (the leading wall's own solid material would
+// sweep through the connector's height on the way down -- there's no
+// direction to lower a fully rigid shell from that clears it). Order is
+// now: lay the TOP piece down (ceiling on the table, everything else
+// pointing up), place the bare board onto it and push the USB-C
+// connector into the tight port opening (a small, mostly horizontal
+// motion, not a drop), then lower the whole top+board unit as one piece
+// straight down onto the tray's pins. The middle_holes' pin (hanging
+// from the ceiling instead of standing up from the tray, unlike
+// far_holes/near_holes) is what gives the board real registration in
+// that middle step, instead of relying on nothing but the connector's
+// friction fit while the rest of the board is held by hand. See
+// middle_holes'/near_holes' own comments up top for how each of the
+// three hole roles is actually built.
+//
+// No screws hold the PCB itself. Alignment pins poke through the board's
+// mounting holes -- the tray hosts them at far_holes/near_holes, the
+// ceiling hosts them at middle_holes. Wherever a pin lives on the tray, a
+// plain washer-shaped hook post hangs from the ceiling over it, clearing
+// it on the way down and coming to rest just above the board once
+// seated; it holds the PCB down passively, the same way a washer under a
+// screw head does, simply because the rigid top above it isn't going
+// anywhere. That "isn't going anywhere" is doing real work: unlike a
+// slide-to-lock mechanism, a snug friction fit alone does not resist
+// being pulled straight back up, and a slotted/keyed hook can't either
+// without either colliding with the pin during any sideways lock motion
+// or requiring a wider-headed pin than this design uses (the geometry
+// was checked both ways). What actually keeps the case shut is a
+// snap-fit latch: two
 // flexible cantilever tabs per long wall (four total, spread toward each
 // end rather than one centered pair, so both ends of the ceiling panel
 // get held down instead of just the middle), each engaging a ramped catch
@@ -41,7 +71,7 @@
 // and alignment, not a lock. The tray's open (cable) end has a short
 // fixed stub wall covering its bottom third; the top's leading wall picks
 // up right where that stops and covers the rest, closing off the whole
-// opening between them except for a recessed USB-C port opening. Since
+// opening between them except for the tight, flush USB-C port opening. Since
 // the top's leading wall spans the tray's full width (Y=0 to outer_h) and
 // the tray's own long walls run its full length (X=0 to outer_w), their
 // footprints would otherwise overlap in a solid block at each of the two
@@ -89,20 +119,72 @@
 //      the wall right where the top's tabs sit; not a printable part)
 
 // ==========================================
-// MEASURED -- from hw/pcb.py, local origin at board bottom-left corner
+// MEASURED -- from hw/esp32c3_cc1101_dongle.kicad_pcb, local origin at
+// board bottom-left corner
 // ==========================================
-board_w = 60;            // board X (kicad Edge.Cuts: 50-110)
+// v1.2: the board's own near/USB edge was trimmed back to align with the
+// ESP32 module's edge (kicad Edge.Cuts moved from X=50 to X=53.75), so the
+// module's onboard USB-C connector -- which already overhung its OWN
+// sub-board by ~1mm -- now overhangs the CARRIER board's edge too, instead
+// of sitting inset behind it. Local X=0 is that new trimmed edge. board_w
+// shrank to match (was 60, spanning kicad X 50-110).
+board_w = 56.25;         // board X (kicad Edge.Cuts: 53.75-110)
 board_h = 24;             // board Y (kicad Edge.Cuts: 38-62)
 board_t = 1.6;             // standard PCB thickness
 
-// 4x M2.5 clearance mounting holes, (x,y) local to board bottom-left corner
-mount_holes = [
-  [2.5, 3.5], [2.5, 20.5], [57.5, 3.5], [57.5, 20.5]
-];
+// 6x M2.5 clearance mounting holes, (x,y) local to board bottom-left
+// corner. Three roles, not one uniform set (see bottom_tray()/top_slide()
+// for how each is actually built):
+//   far_holes    -- unchanged from v1.1. Tray hosts the alignment pin,
+//                   top hosts the retention hook (half-cut where it would
+//                   overlap the CC1101 module -- still auto-detected, see
+//                   overlaps_cc1101 below).
+//   middle_holes -- new. Sit in the one stretch of bare board between the
+//                   ESP32 module and C1 (the radial cap at kicad (88,46.19),
+//                   local (34.25, 8.19)) -- checked clear of both modules
+//                   and the cap by real margin, not just eyeballed. Y
+//                   positions (kicad 42.5/59.25, local 4.5/21.25) aren't
+//                   symmetric like far_holes' -- they're wherever the
+//                   real routing leaves the most room: two long signal
+//                   traces run almost the board's full width right
+//                   through this area (kicad Y 39.54 and 56.42), and an
+//                   earlier pass here just mirrored far_holes' Y (kicad
+//                   41.5/58.5) without checking against them, leaving
+//                   only ~0.6-0.7mm of copper clearance. Checked directly
+//                   against every routed segment's actual position now,
+//                   not just the two modules -- current values clear the
+//                   nearest trace by ~1.5-1.6mm, in line with the rest of
+//                   the board's holes (near_holes/far_holes clear by
+//                   ~2-8mm). Pin and hook are SWAPPED here versus far_holes: the pin
+//                   hangs from the top piece's ceiling instead of standing
+//                   up from the tray. That gives the board real
+//                   registration (not just the USB connector's friction
+//                   fit) when it's placed onto the top piece first, before
+//                   the tray closes up underneath it -- see the assembly
+//                   section up top. Trade-off: this location no longer has
+//                   hook-style anti-rattle retention of its own -- it
+//                   relies on the far_holes hooks plus the board's own
+//                   rigidity. Acceptable since it's not near any
+//                   stress-inducing feature (button, USB port).
+//   near_holes   -- new, at the USB end. Short pin only (board_t tall),
+//                   no cap at all: there's no ceiling material left at
+//                   this end to hang a hook from once the leading wall's
+//                   port opening is cut down to the bare connector's size
+//                   (see usb_port_w/h below). Positioned in the one Y-band
+//                   clear of the ESP32 module's own header-pin rows
+//                   (kicad Y 41.5/58.5, i.e. local Y 3.5/20.5) with real
+//                   margin, not just inside the board outline.
+far_holes = [[53.75, 3.5], [53.75, 20.5]];
+middle_holes = [[27.25, 4.5], [27.25, 21.25]];
+near_holes = [[3.75, 8], [3.75, 16]];
+mount_holes = concat(far_holes, middle_holes, near_holes);
 mount_hole_d = 2.5;
 
-// ESP32-C3 Super Mini socket/footprint center + silkscreen outline (local)
-esp32_center = [15, 12];
+// ESP32-C3 Super Mini socket/footprint center + silkscreen outline (local).
+// Center shifted by the same -3.75 as everything else when the board's
+// origin moved to the new trimmed edge -- the module itself didn't move,
+// only where we call X=0. Its near edge now sits exactly at local X=0.
+esp32_center = [11.25, 12];
 // Official ESP32-C3 SuperMini board size (per Espressif-adjacent vendor specs,
 // e.g. espboards.dev/mischianti.org): 22.5 x 18mm. Replaces an earlier
 // guess that had the dimensions both backwards and oversized on the Y
@@ -113,7 +195,7 @@ esp32_outline = [22.5, 18];  // module footprint envelope, X x Y
 // CC1101 socket (the 2x4 header pcb.py actually placed) center -- exact
 // KiCad footprint position. The real breakout module that plugs into it
 // is a separate, bigger board -- see cc1101_module_outline below.
-cc1101_center = [48, 12];
+cc1101_center = [44.25, 12];
 
 // ==========================================
 // ESTIMATED -- verify against real hardware before printing
@@ -151,54 +233,49 @@ esp32_pcb_top_above_board = 3.74;   // measured: standard 2.54mm pin header
                                        // real board, replacing an earlier
                                        // ~1mm estimate)
 
-// USB-C port opening, flush through the leading-edge wall (no recessed
-// pocket around it -- see the through-opening comment further down for
-// why): modules face the board's short left edge (X=0). Rather than a
-// soldered/attached cable routed through an open slot, this assumes the
-// Super Mini's own onboard USB-C receptacle sits right at this opening
-// -- you plug a cable in from outside whenever needed, nothing threads
-// through during assembly.
+// USB-C port opening, through the leading-edge wall: modules face the
+// board's short left edge (X=0). v1.2 change -- this is no longer sized
+// for a cable's plug shell to pass through and reach a connector sitting
+// well clear of the wall. Trimming the board to the module's edge (see
+// board_w above) also pulled the board in until it sits within
+// near_end_clearance of the wall's own inner face (see board_origin
+// further down) -- close enough that the connector, which already
+// overhangs the module by ~1mm, ends up embedded IN the wall's own
+// wall_t thickness rather than clear of it. So the opening is now sized
+// tight to the bare connector itself: a real cable's plug shell butts up
+// against the flush outer wall face around this opening, and only the
+// metal tip passes through the remaining sliver of wall to reach the
+// connector. This also means assembly is no longer "seat the board on
+// the tray, then drop the top on with nothing to thread" -- see the
+// assembly section up top for the two-stage sequence this now needs
+// (connector into this opening first, then the whole top+board unit
+// drops onto the tray's pins).
 //
 // The USB-C connector itself sits flush on top of the ESP32 PCB (no
 // gap) and is 3.2mm tall, per a detailed reference model of the real
 // board -- its own span is esp32_pcb_top_above_board to +3.2mm above
 // the main board. usb_port_w is cross-checked against that same
-// reference (connector is 9mm wide) with a small margin. The Y position
-// still assumes the connector centers on the module the same way
-// usb_port_y assumes (= ESP32 module Y-center) -- not directly measured.
-//
-// The opening itself is a plain closed rectangle, NOT open at the top
-// into the ceiling: an earlier version cut all the way up through the
-// case's own top surface on the reasoning that there was no structural
-// need to leave material there, but that let you see straight through
-// to the ceiling's underside/seam through the opening, which looks
-// wrong and isn't needed -- the plug only has to reach the connector,
-// not the roof of the case. See usb_port_window_top/usb_port_h further
-// down (after ceiling_bot_z exists) for how the opening is kept clear
-// of that boundary instead.
+// reference (connector is 9mm wide) with a small fitting margin. The Y
+// position still assumes the connector centers on the module the same
+// way usb_port_y assumes (= ESP32 module Y-center) -- not directly
+// measured.
 usb_port_y = 12;                    // port center, board Y (= ESP32 module Y-center)
 usb_connector_height = 3.2;         // measured: real USB-C connector height, PCB to top
-// Sized to the OUTER edge of the old recessed pocket (removed above),
-// not just the bare connector + a small margin: that recess used to be
-// 2mm wider/taller than the through-opening on each side specifically
-// to fit a cable's plug housing, and simply deleting the recess without
-// carrying that size into the through-opening itself would have left
-// the actual hole too tight for a real plug to pass through.
-usb_port_w = 14;                    // through-opening width (Y) -- was 10 (bare connector 9mm + small margin),
-                                       // now the old recess's outer width (10 + 2x2mm margin)
-usb_port_h = 6;                     // through-opening height (Z) -- what the plug itself needs (measured), not the bare connector
+usb_port_z_margin = 0.4;            // clearance above/below the bare connector inside the tight opening
+usb_port_w = 10;                    // through-opening width (Y) -- bare connector (9mm) + 0.5mm margin each side
 
 // Reset-button guide tunnel: button is top-mounted (pressed straight
 // down). A tube hangs from the ceiling down toward the board, so a
 // toothpick/pin is guided straight to the button instead of just poking
 // through a thin hole in the ceiling with nothing below to aim it.
-// Position is now measured off the real board, from the center of the
-// near mounting hole (2.5, 3.5): the BOOT button is 11mm from that
-// center along the board's long (X) direction, and 6mm from it along
-// the short (Y) direction.
+// Measured off the real board: the BOOT button is 11mm from the OLD
+// near mounting hole's center along the board's long (X) direction, and
+// 6mm from it along the short (Y) direction. v1.2 shifted the local
+// origin by -3.75 (see board_w above) when that hole was removed, so the
+// X value below carries the same shift (13.5 - 3.75); Y is untouched.
 button_hole_d = 3;      // bore diameter -- fits a toothpick/paperclip/pin
-button_hole_x = 13.5;   // local X -- mount_holes' (2.5, 3.5) + 11 in X
-button_hole_y = 9.5;    // local Y -- mount_holes' (2.5, 3.5) + 6 in Y
+button_hole_x = 9.75;   // local X
+button_hole_y = 9.5;    // local Y
 button_tube_wall = 1;                // tube wall thickness
 // The BOOT button sits on top of the ESP32 module's own PCB, not
 // directly on the main board -- the ESP32 is raised on pin headers, and
@@ -311,15 +388,28 @@ snap_engage_h = 3;             // ridge/catch engagement height
 // ==========================================
 wall_t = 2;               // wall thickness
 floor_t = 2;               // tray floor thickness
-board_margin = 2;        // clearance around board edges inside the case
+board_margin = 2;        // clearance around board edges inside the case (long walls + far end)
+// v1.2: the near/USB end no longer gets the full board_margin gap -- the
+// board sits close enough to the wall's inner face that the overhanging
+// connector lands inside the wall's own thickness (see usb_port_w/h and
+// board_origin below). Same order of magnitude as fit_clearance, since
+// it's the same kind of "as tight as FDM tolerances allow" gap, not a
+// functional clearance for anything to move through.
+near_end_clearance = 0.3;
 standoff_h = 5;            // pad height, floor-to-PCB-bottom (solder joint clearance)
 boss_d = 5;                // mounting pad outer diameter
 fit_clearance = 0.3;     // FDM friction/slide clearance
+// Gap above the middle standoffs' tray boss that the ceiling-hung pin's
+// tip stops short of, same idea as hook_gap_above_board -- keeps the pin
+// from jamming against the boss once the tray closes up underneath it.
+middle_pin_gap_above_boss = 0.3;
 
 // Derived
-cavity_w = board_w + 2 * board_margin;
 cavity_h = board_h + 2 * board_margin;
-outer_w = cavity_w + 2 * wall_t + far_end_extra;
+// Case length: wall + near_end_clearance (not board_margin) + board +
+// board_margin + wall at the far end, plus far_end_extra for the CC1101
+// module/antenna overhang past the board's own far edge.
+outer_w = wall_t + near_end_clearance + board_w + board_margin + wall_t + far_end_extra;
 outer_h = cavity_h + 2 * wall_t;
 tray_wall_h = standoff_h + board_t + component_clearance; // floor-top to ceiling-bottom
 skirt_bot_z = floor_t + standoff_h + board_t; // where the top's skirts/leading wall start, just above the board
@@ -329,34 +419,28 @@ button_tube_od = button_hole_d + 2 * button_tube_wall;
 button_tube_bot_z = skirt_bot_z + esp32_pcb_top_above_board
                      + button_height_above_esp32_pcb + button_tube_gap_above_board;
 end_wall_top_z = floor_t + tray_wall_h * end_wall_frac;
+middle_pin_bot_z = floor_t + standoff_h + middle_pin_gap_above_boss; // where the ceiling-hung middle pins stop
 
-// The USB port opening's top edge is anchored exactly at ceiling_bot_z
-// (where the leading wall ends and the solid ceiling begins) instead of
-// being centered on the real connector: an earlier version centered the
-// window on the connector, which -- combined with usb_port_h -- pushed
-// the top edge past that boundary, letting you see through to the
-// ceiling's underside/seam through the opening. usb_port_margin_below_ceiling
-// is 0 (flush with the boundary, not into it) -- kept as a named
-// quantity rather than inlined so it's obvious where to add margin back
-// if a flush top edge ever turns out to read as a seam line in practice.
-// The window (usb_port_h tall) still comfortably contains the real
-// connector's span (esp32_pcb_top_above_board to +usb_connector_height)
-// -- checked below with assert() rather than just assumed, since this
-// exact kind of boundary math has been wrong here twice already this
-// session.
-usb_port_margin_below_ceiling = 0;
-usb_port_window_top = ceiling_bot_z - usb_port_margin_below_ceiling;
-usb_port_window_bot = usb_port_window_top - usb_port_h;
-usb_port_z_above_board = usb_port_window_bot - skirt_bot_z + usb_port_h / 2;
+// v1.2: the USB port window is no longer anchored at the ceiling -- that
+// only made sense for the old wide opening, which stayed open all the way
+// up so a plug's shell had room to pass through. The new tight opening is
+// centered on the real connector's own span instead (measured from
+// skirt_bot_z + esp32_pcb_top_above_board, same reference used
+// everywhere else), with usb_port_z_margin of clearance top and bottom.
+// usb_port_h falls out of that instead of being a direct input.
+usb_port_window_bot = skirt_bot_z + esp32_pcb_top_above_board - usb_port_z_margin;
+usb_port_window_top = skirt_bot_z + esp32_pcb_top_above_board + usb_connector_height + usb_port_z_margin;
+usb_port_h = usb_port_window_top - usb_port_window_bot;
 
-assert(usb_port_window_bot <= skirt_bot_z + esp32_pcb_top_above_board,
-        "USB port window bottom doesn't clear the real connector's bottom edge");
-assert(usb_port_window_top >= skirt_bot_z + esp32_pcb_top_above_board + usb_connector_height,
-        "USB port window top doesn't clear the real connector's top edge");
+assert(usb_port_window_top < ceiling_bot_z,
+        "USB port window reaches the ceiling -- tight opening should leave solid wall above it");
+assert(usb_port_window_bot > end_wall_top_z,
+        "USB port window reaches down into the tray's own stub wall");
 
-// Board-local -> case-local (board sits centered in the cavity, offset by
-// wall_t + board_margin from the case's own bottom-left corner)
-board_origin = [wall_t + board_margin, wall_t + board_margin];
+// Board-local -> case-local. X uses near_end_clearance (not board_margin)
+// since the near/USB edge sits much closer to the wall than the other
+// three sides do -- see near_end_clearance above.
+board_origin = [wall_t + near_end_clearance, wall_t + board_margin];
 
 function b2c(p) = [p[0] + board_origin[0], p[1] + board_origin[1]];
 
@@ -367,12 +451,12 @@ function b2c(p) = [p[0] + board_origin[0], p[1] + board_origin[1]];
 //
 // A third pair sits out in the far-end extension (module + antenna
 // clearance, added later -- see far_end_extra): that extension is now
-// ~57mm, more than the board's own 60mm length, and originally had zero
-// clips of its own -- the far ~59mm of a 125mm case (from the far board
+// ~57mm, more than the board's own ~56mm length, and originally had zero
+// clips of its own -- the far ~59mm of a ~120mm case (from the far board
 // edge all the way to the closed end) was relying entirely on the two
 // board-region clips to hold it shut. Positioned 60% of the way out
 // into that extension: clear of the CC1101 module's real footprint
-// (cc1101_module_center/outline, world X up to ~79) with room to
+// (cc1101_module_center/outline, world X up to ~74) with room to
 // spare, and well short of the far wall's own corner rounding.
 snap_x_list = [board_origin[0] + board_w * 0.2, board_origin[0] + board_w * 0.8,
                  board_origin[0] + board_w + far_end_extra * 0.6];
@@ -566,8 +650,8 @@ $fn = 48; // smooth cylinders
 
 part = "both"; // overridden via -D 'part="tray"' / "top" / "both" for preview
 
-module mount_hole_positions() {
-  for (h = mount_holes) translate(b2c(h)) children();
+module hole_positions(list) {
+  for (h = list) translate(b2c(h)) children();
 }
 
 // Open-ended U-channel: floor + 2 long side walls + 1 closed far-end wall
@@ -612,13 +696,30 @@ module bottom_tray() {
       snap_ridge_low(x);
       snap_ridge_high(x);
     }
-    // 4 mounting pads with alignment pins on top
-    mount_hole_positions()
+    // far-end mounting pads with alignment pins on top -- unchanged from
+    // v1.1, the tray hosts both boss and pin here
+    hole_positions(far_holes)
       union() {
         translate([0, 0, floor_t])
           cylinder(d = boss_d, h = standoff_h);
         translate([0, 0, floor_t + standoff_h])
           cylinder(d = pin_d, h = pin_h);
+      }
+    // middle mounting pads: boss only. The alignment pin here hangs from
+    // the top piece's ceiling instead (see top_slide()) -- see
+    // middle_holes' own comment up top for why.
+    hole_positions(middle_holes)
+      translate([0, 0, floor_t])
+        cylinder(d = boss_d, h = standoff_h);
+    // near/USB mounting pads: boss plus a short pin, just tall enough to
+    // pass through the board (board_t) and no taller -- nothing caps
+    // these from above (see near_holes' own comment up top).
+    hole_positions(near_holes)
+      union() {
+        translate([0, 0, floor_t])
+          cylinder(d = boss_d, h = standoff_h);
+        translate([0, 0, floor_t + standoff_h])
+          cylinder(d = pin_d, h = board_t);
       }
   }
   // Dimple texture on the 3 closed walls (cosmetic only -- no vent holes
@@ -771,6 +872,22 @@ module hook_post(hook_bot_z, ceiling_top_z, half = false, dir = 1, axis = "x") {
       }
 }
 
+// USB-C port cutter: a stadium shape (a rectangle with semicircular
+// ends), not a plain rectangle -- that's the real connector's own
+// silhouette, not a square notch. Built as a hull() of two rods, each a
+// cylinder rotated to run along X (the wall's thickness direction)
+// instead of its default Z, so the rounded ends land on the port's short
+// (Y) sides where the real connector is actually rounded. Radius is
+// h/2, so h also sets how rounded the ends are -- a taller opening would
+// need its own radius parameter instead, but that doesn't come up here.
+module usb_port_cutter(depth, w, h) {
+  r = h / 2;
+  hull() {
+    translate([0, -(w / 2 - r), 0]) rotate([0, 90, 0]) cylinder(r = r, h = depth);
+    translate([0, w / 2 - r, 0]) rotate([0, 90, 0]) cylinder(r = r, h = depth);
+  }
+}
+
 // Flat-topped box with a rounded fillet around its top outer edge (all 4
 // sides, including corners): flat-walled prism up to (t - r), capped
 // with a minkowski-rounded dome for the last r of height. The dome's
@@ -851,7 +968,7 @@ module top_slide() {
       //   edge" the way CC1101's holes clearly do -- X remains the
       //   decisive, unambiguous overlap axis, so the cap keeps the half
       //   away from the module's X-center instead.
-      for (h = mount_holes) {
+      for (h = far_holes) {
         overlaps_cc1101 = (h[0] + hook_od / 2 > cc1101_module_center[0] - cc1101_module_outline[0] / 2)
                         && (h[0] - hook_od / 2 < cc1101_module_center[0] + cc1101_module_outline[0] / 2)
                         && (h[1] + hook_od / 2 > cc1101_module_center[1] - cc1101_module_outline[1] / 2)
@@ -870,6 +987,23 @@ module top_slide() {
           else
             hook_post(hook_bot_z, ceiling_top_z);
       }
+      // middle holes: a plain pin hanging from the ceiling, not a hook --
+      // pin and boss are swapped here versus far_holes (see middle_holes'
+      // comment up top for why). Stops middle_pin_gap_above_boss short of
+      // the tray's own boss (middle_pin_bot_z) so it doesn't jam against
+      // it once the tray closes up from below; the ~1.3mm of the board's
+      // own thickness that's left engaged is enough to actually register
+      // the board's position while it's placed onto this piece.
+      // Checked clear of both modules (see middle_holes' comment), so no
+      // half-cut logic needed here -- it's a thin pin, not a wide washer.
+      hole_positions(middle_holes)
+        translate([0, 0, middle_pin_bot_z])
+          cylinder(d = pin_d, h = ceiling_bot_z - middle_pin_bot_z);
+      // near/USB holes: nothing hangs from the ceiling here at all -- once
+      // the leading wall's port opening is cut down to the bare
+      // connector's size (see usb_port_w/h), there's no ceiling material
+      // left at this end to hang anything from. See near_holes' comment
+      // up top for the retention trade-off this implies.
       // reset-button guide tube, hanging from the ceiling down toward the
       // board (overlaps into the ceiling itself for a clean union)
       translate([board_origin[0] + button_hole_x, board_origin[1] + button_hole_y, button_tube_bot_z])
@@ -880,26 +1014,29 @@ module top_slide() {
       cylinder(d = button_hole_d, h = (ceiling_top_z - button_tube_bot_z) + 1);
     // Dimple texture + integrated vent holes
     dot_texture_ceiling(ceiling_top_z);
-    // USB-C port through the leading-edge wall: a plain flush opening,
-    // straight through the wall's full thickness, no recessed pocket
-    // around it. An earlier version stepped the surface back around the
-    // opening for a receptacle-style look -- removed, since that step
-    // narrows the usable opening right where a cable's own plug
-    // housing (wider than the bare connector) needs clearance to seat,
-    // not just the bare connector pins. This assumes the board's own
-    // onboard USB-C connector sits right here and gets plugged into
-    // from outside after the case is closed -- but every dimension is
-    // still a guess (see usb_port_* above).
+    // USB-C port through the leading-edge wall: a stadium-shaped opening
+    // (see usb_port_cutter()) matching the real connector's own rounded
+    // silhouette, not a square notch -- straight through the wall's full
+    // thickness at (usb_port_window_bot to usb_port_window_top). v1.2
+    // sizes this tight to the bare connector (usb_port_w/h), not to a
+    // cable plug's shell -- the board now sits close enough to this wall
+    // (near_end_clearance) that the connector is embedded in the wall's
+    // own thickness rather than clear of it, so there's no room left in
+    // front of it for a plug shell to seat in anyway. A real plug's
+    // shell butts up against the flush outer wall face around this
+    // opening; only its metal tip passes through the remaining sliver of
+    // wall to reach the connector. Every dimension here is still
+    // ultimately a guess off a reference model, not calipers on the real
+    // board -- see usb_port_* above.
     //
-    // A plain closed rectangle (usb_port_window_bot to usb_port_window_top,
-    // both computed above alongside ceiling_bot_z): the plug only needs
-    // to reach the connector, not the roof of the case, so the opening
-    // stops with real wall material still above it rather than cutting
-    // through into the ceiling.
+    // The window stays well clear of the ceiling above it (see the
+    // usb_port_window_top assert alongside ceiling_bot_z) -- real wall
+    // material remains above the opening, same reasoning as before: the
+    // plug only needs to reach the connector, not the roof of the case.
     translate([-0.5,
-               board_origin[1] + usb_port_y - usb_port_w / 2,
-               usb_port_window_bot])
-      cube([wall_t + 1, usb_port_w, usb_port_h]);
+               board_origin[1] + usb_port_y,
+               usb_port_window_bot + usb_port_h / 2])
+      usb_port_cutter(wall_t + 1, usb_port_w, usb_port_h);
     // Vertical corner rounding on the leading-edge wall (the near/USB-side
     // corners), picking up exactly where the tray's own near-corner
     // rounding leaves off: the tray rounds those same 2 corners at full
@@ -958,19 +1095,18 @@ module board_reference() {
   // USB-C connector body, mounted on the ESP32 module -- sized and
   // positioned from the same detailed reference model as
   // esp32_pcb_top_above_board/usb_connector_height: 9mm wide x 7.3mm
-  // deep, sitting 1mm proud of the ESP32 sub-module's own near edge (not
-  // the main board's edge -- an earlier version of this box started 2mm
-  // out past the case's leading wall entirely, which the real board's
-  // photos contradict directly: the connector does not overhang the
-  // main PCB at all, since the ESP32 sub-module itself is well inset
-  // from the main board's edge).
+  // deep, sitting 1mm proud of the ESP32 sub-module's own near edge. As
+  // of v1.2 that's also the MAIN board's edge (esp32_center's near edge
+  // now sits exactly at local X=0, see board_w above) -- so this box
+  // does overhang the main PCB by that same 1mm, unlike in v1.1 where
+  // the sub-module was well inset from the main board's edge.
   usb_connector_depth = 7.3;
   usb_connector_width = 9;
   color("silver", 0.7)
     translate([board_origin[0] + esp32_center[0] - esp32_outline[0] / 2 - 1,
                 board_origin[1] + esp32_center[1] - usb_connector_width / 2,
-                skirt_bot_z + usb_port_z_above_board - usb_port_h / 2])
-      cube([usb_connector_depth, usb_connector_width, usb_port_h]);
+                skirt_bot_z + esp32_pcb_top_above_board])
+      cube([usb_connector_depth, usb_connector_width, usb_connector_height]);
   // Antenna, extending antenna_reach past the CC1101 module's far edge --
   // see antenna_reach's own comment for how it was measured and its
   // orientation caveat. A plain cylinder standing in for the real coil,
@@ -1005,7 +1141,7 @@ if (part == "tray") {
   // distinct colors (and translucent) so it's easy to see how everything
   // actually lines up, rather than three overlapping solids in the same
   // default material color.
-  #color("steelblue", 0.5) bottom_tray();
+  color("steelblue", 0.5) bottom_tray();
   color("lightgray", 0.6) top_slide();
   board_reference();
 }
