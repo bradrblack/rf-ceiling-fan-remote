@@ -1,0 +1,4 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "Custom_Library")(type "KiCad")(uri "${KIPRJMOD}/Custom_Library.kicad_sym")(options "")(descr "Custom symbols for this dongle board (ESP32-C3 SuperMini, CC1101 module, polarized cap)"))
+)
