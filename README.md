@@ -39,8 +39,8 @@ This is a multi-sketch PlatformIO project — each `.ino`/`.cpp` lives in its ow
 |---|---|---|
 | `c3_mini` (default) | `src/sniff.ino` | Listens on the CC1101 and prints the decimal code, bit length, protocol number, and pulse length for every button pressed on the physical remote. Run this first to capture your own remote's codes. |
 | `c3_mini_tx` | `src/tx_test/` | Standalone transmit test — sends a single code on a timer, used for bench-testing range and signal timing independent of SinricPro/WiFi. |
-| `c3_mini_fan` | `src/fan_control/` | The production firmware: connects to WiFi and SinricPro, and re-transmits the correct RF code when a fan or light command comes in. |
-| `c3_mini_fan_public` | `src/fan_control_public/` | Same as `c3_mini_fan`, but for sharing with someone else who has the same fan/remote hardware — see [For other users](#for-other-users) below. |
+| `c3_mini_fan` | `src/fan_control/` | The production firmware: connects to WiFi and SinricPro, and re-transmits the correct RF code when a fan or light command comes in. Also supports an optional second fan, independently TR313A or SST12 — see [Fan 2](#fan-2-experimental-second-fanremote) below (**experimental for SST12**). |
+| `c3_mini_fan_public` | `src/fan_control_public/` | Same as `c3_mini_fan`, but for sharing with someone else who has the same fan/remote hardware — see [For other users](#for-other-users) below. **TR313A only — no fan2/SST12 support.** |
 
 Build/upload a specific environment with:
 ```
@@ -80,7 +80,7 @@ If you're cloning this for a different remote, re-run `sniff.ino` with all DIP s
 
 ## For other users
 
-`c3_mini_fan` (above) compiles your WiFi and SinricPro credentials in from `secrets.h`, which is convenient for one device you control but means sharing it with someone else requires them to edit and rebuild the source. `c3_mini_fan_public` (`src/fan_control_public/`) is the same firmware — same CC1101 wiring, same RF codes/watchdogs/reliability behavior — but collects WiFi and SinricPro credentials at first boot through a [WiFiManager](https://github.com/tzapu/WiFiManager) captive portal instead, so someone with the **same fan/remote hardware** can flash it and configure it themselves without touching any code.
+`c3_mini_fan` (above) compiles your WiFi and SinricPro credentials in from `secrets.h`, which is convenient for one device you control but means sharing it with someone else requires them to edit and rebuild the source. `c3_mini_fan_public` (`src/fan_control_public/`) covers the fan 1 (TR313A) side of that same firmware — same CC1101 wiring, same RF codes/watchdogs/reliability behavior — but collects WiFi and SinricPro credentials at first boot through a [WiFiManager](https://github.com/tzapu/WiFiManager) captive portal instead, so someone with the **same fan/remote hardware** can flash it and configure it themselves without touching any code. It does not include `c3_mini_fan`'s [fan 2 support](#fan-2-experimental-second-fanremote) — that stays a `secrets.h`/rebuild-only, experimental feature for now.
 
 This replaces the WiFi/SinricPro *credentials* and the remote's *DIP switch address* with portal fields — the base RF codes, CC1101 pins, and RF frequency/protocol are still compile-time constants in the source, since those are specific to this exact fan/remote model. It's for sharing the same physical build (same remote model, possibly a different individual fan/DIP address), not a general-purpose RF-cloning tool.
 
