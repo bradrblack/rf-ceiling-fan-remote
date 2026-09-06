@@ -104,6 +104,19 @@ The device is reachable on the local network at `http://<hostname>.local` (defau
 
 The remote's DIP switches address multiple physically distinct fans on the same frequency/protocol — each fan only responds to a remote (or this controller) configured with its matching switch positions. If you have more than one of these controllers on the same network, give each a distinct hostname in the setup portal (`myfan`, `myfan2`, etc.) *and* set its own DIP fields to match the specific fan it's paired with.
 
+## Fan 2 (experimental, second fan/remote)
+
+`fan_control.cpp` can optionally drive a second physical fan alongside the first, each independently choosing its remote family via `FAN1_REMOTE_TYPE`/`FAN2_REMOTE_TYPE` in `secrets.h`:
+
+- **`REMOTE_TR313A`** (fan 1's default) — same DIP-switch-addressed code family described above, just a different DIP address for the second fan.
+- **`REMOTE_SST12`** (fan 2's default) — a different remote chip (used by some NOMA fans) that pairs directly to the fan's receiver instead of using DIP switches. It has no combined low/medium/high scheme — a dedicated button per speed (1-6) plus separate Off and Light-toggle buttons — and every button's code is unique to that one paired remote/receiver, with no derivable address formula the way TR313A has.
+
+**This only works today if you already own a remote that's paired to the fan** — you sniff its buttons with `sniff.ino` (see `secrets.h.example` for the exact `FANn_RF_CODE_*` fields) and this firmware then impersonates that already-paired remote. There is no support for *pairing a new remote from scratch* (provisioning a bare receiver that has no working remote) — SST12 pairing is receiver-side (a power-cycle-then-button-combo handshake within a few seconds), and reproducing it would require reverse-engineering what a genuine remote actually transmits during that handshake, which hasn't been done. If you don't already have a paired, working remote for the fan you want to add, this won't help you.
+
+Fan 2's fan and light SinricPro devices (`FAN2_ID`/`LIGHT2_ID`) are each independently optional, so a build can be fan-only, light-only, both, or neither, to fit within SinricPro's free 3-device tier or not.
+
+Given the pairing gap above, this is closer to "works for one specific home's specific hardware" than a general-purpose feature — there's no `c3_mini_fan_public`-equivalent shareable build for fan 2 yet.
+
 ## Known limitation
 
 The remote only has a single **light toggle** button, not separate on/off codes. The firmware tracks an assumed light state locally and only fires the toggle when a voice command's requested state differs from that tracked state. If the light is ever toggled some other way (the original remote, a wall switch), the tracked state can drift out of sync with reality — there's no feedback path from the fan to detect this.
