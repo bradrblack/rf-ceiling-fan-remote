@@ -25,7 +25,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-09-05r3"
+#define FIRMWARE_VERSION "2026-09-05r4"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -53,6 +53,10 @@ R"(  __  __         _____
 #define LED_OFF         HIGH
 #define LED_BLINK_MS    500
 
+// TR313A family constants -- shared by any fan slot that selects
+// REMOTE_TR313A. The remote's DIP switches select the address, not a
+// different code family, so these values are the same regardless of
+// which fan slot uses them.
 #define RF_MHZ          304.25
 #define RF_PROTOCOL     11
 #define RF_PULSE_US     412
@@ -62,9 +66,7 @@ R"(  __  __         _____
 // nibble 0000). This remote encodes its DIP switch address as the low 4
 // bits of the 12-bit code, OFF=1/ON=0 per switch (switch 1 = bit 3 down to
 // switch 4 = bit 0) -- confirmed by sniffing the same 5 buttons across 3
-// different switch combinations and finding only that nibble changes. The
-// actual per-fan codes are computed at boot by OR-ing this base with the
-// address nibble for DIP_SWITCH_1..4 in secrets.h (see dipAddressNibble()).
+// different switch combinations and finding only that nibble changes.
 // Re-run sniff.ino with all switches ON to recapture these for a different
 // remote.
 #define RF_CODE_FAN_LOW_BASE    2032
@@ -73,63 +75,102 @@ R"(  __  __         _____
 #define RF_CODE_FAN_OFF_BASE    4016
 #define RF_CODE_LIGHT_BASE      3056
 
-// Address nibble encoded by the remote's DIP switches: each switch
+// SST12 family constants -- shared by any fan slot that selects
+// REMOTE_SST12. Captured with sniff.ino at 433.92MHz against a real NOMA
+// SST12 remote: frequency, rc-switch protocol number, pulse length, and
+// bit length are properties of the SST12 chip itself (confirmed the same
+// across that remote's Off/Light/Speed1-6 buttons), so they're shared
+// here too -- only the actual per-button codes are unique per paired
+// remote/receiver, supplied per-slot as FANn_RF_CODE_* in secrets.h.
+#define SST12_RF_MHZ       433.92
+#define SST12_RF_PROTOCOL  1
+#define SST12_RF_PULSE_US  257
+#define SST12_RF_BITLENGTH 32
+
+// Address nibble encoded by a TR313A remote's DIP switches: each switch
 // contributes one bit (1->bit3 .. 4->bit0), OFF = 1, ON = 0. OR'd with the
-// base codes above to get this fan's actual RF codes.
+// base codes above to get that fan's actual RF codes.
 uint8_t dipAddressNibble(bool sw1On, bool sw2On, bool sw3On, bool sw4On) {
   return (sw1On ? 0 : 8) | (sw2On ? 0 : 4) | (sw3On ? 0 : 2) | (sw4On ? 0 : 1);
 }
 
-uint16_t rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight;
-
-void computeRfCodes() {
-  uint8_t addr = dipAddressNibble(DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4);
-  rfCodeFanLow    = RF_CODE_FAN_LOW_BASE    | addr;
-  rfCodeFanMedium = RF_CODE_FAN_MEDIUM_BASE | addr;
-  rfCodeFanHigh   = RF_CODE_FAN_HIGH_BASE   | addr;
-  rfCodeFanOff    = RF_CODE_FAN_OFF_BASE    | addr;
-  rfCodeLight     = RF_CODE_LIGHT_BASE      | addr;
-}
-
 // ==========================================
-// Fan 2 (second physical fan, different remote family)
+// Fan 1 and Fan 2 -- each independently picks its remote family
 // ==========================================
-// Fan 2's remote is picked per-build in secrets.h via FAN2_REMOTE_TYPE, so
-// the same firmware can drive either a second TR313A-style fan (DIP-switch
-// addressed, same code family as fan 1) or a NOMA SST12 remote (paired
-// directly to the fan's receiver -- no DIP switches, one fixed code per
-// button). Fan 2 has no light device: its light is on the wall switch.
+// Every combination is supported: both TR313A, both SST12, or one of
+// each. FAN1_REMOTE_TYPE defaults to REMOTE_TR313A (fan 1's original,
+// still-deployed config) so existing secrets.h files keep working
+// unchanged; FAN2_REMOTE_TYPE defaults to REMOTE_SST12.
+#ifndef FAN1_REMOTE_TYPE
+#define FAN1_REMOTE_TYPE REMOTE_TR313A
+#endif
 #ifndef FAN2_REMOTE_TYPE
 #define FAN2_REMOTE_TYPE REMOTE_SST12
 #endif
 
+#if FAN1_REMOTE_TYPE == REMOTE_TR313A
+#define FAN1_RF_MHZ       RF_MHZ
+#define FAN1_RF_PROTOCOL  RF_PROTOCOL
+#define FAN1_RF_PULSE_US  RF_PULSE_US
+#define FAN1_RF_BITLENGTH RF_BITLENGTH
+#define FAN1_MAX_SPEED    3
+#elif FAN1_REMOTE_TYPE == REMOTE_SST12
+#define FAN1_RF_MHZ       SST12_RF_MHZ
+#define FAN1_RF_PROTOCOL  SST12_RF_PROTOCOL
+#define FAN1_RF_PULSE_US  SST12_RF_PULSE_US
+#define FAN1_RF_BITLENGTH SST12_RF_BITLENGTH
+#define FAN1_MAX_SPEED    6
+#else
+#error "Unknown FAN1_REMOTE_TYPE -- must be REMOTE_TR313A or REMOTE_SST12"
+#endif
+
 #if FAN2_REMOTE_TYPE == REMOTE_TR313A
-// Same RF family as fan 1 -- just a different DIP address nibble
-// (FAN2_DIP_SWITCH_1..4 in secrets.h). Only 3 speeds (low/medium/high),
-// same as fan 1's remote family.
 #define FAN2_RF_MHZ       RF_MHZ
 #define FAN2_RF_PROTOCOL  RF_PROTOCOL
 #define FAN2_RF_PULSE_US  RF_PULSE_US
 #define FAN2_RF_BITLENGTH RF_BITLENGTH
 #define FAN2_MAX_SPEED    3
 #elif FAN2_REMOTE_TYPE == REMOTE_SST12
-// Captured with sniff.ino (env:c3_mini) at 433.92MHz against a real NOMA
-// SST12 remote -- Off plus 6 discrete speed buttons (no combined
-// low/medium/high; this remote has its own dedicated button per speed),
-// each decoding cleanly and repeatably via rc-switch's built-in protocol
-// 1, no custom RCSwitch::Protocol needed. The remote also has a Light
-// toggle (captured as 434640969, same bit length/protocol/pulse length)
-// but fan 2's light stays on the wall switch, so it isn't wired up here.
-// The actual per-button codes live in FAN2_RF_CODE_* in secrets.h.
-#define FAN2_RF_MHZ       433.92
-#define FAN2_RF_PROTOCOL  1
-#define FAN2_RF_PULSE_US  257
-#define FAN2_RF_BITLENGTH 32
+#define FAN2_RF_MHZ       SST12_RF_MHZ
+#define FAN2_RF_PROTOCOL  SST12_RF_PROTOCOL
+#define FAN2_RF_PULSE_US  SST12_RF_PULSE_US
+#define FAN2_RF_BITLENGTH SST12_RF_BITLENGTH
 #define FAN2_MAX_SPEED    6
 #else
 #error "Unknown FAN2_REMOTE_TYPE -- must be REMOTE_TR313A or REMOTE_SST12"
 #endif
 
+// Fan 1 code storage. TR313A uses DIP_SWITCH_1..4 (unchanged name, for
+// backward compatibility with existing secrets.h files); SST12 uses fixed
+// per-unit codes from FAN1_RF_CODE_* in secrets.h.
+uint32_t rfCodeFan1Off, rfCodeFan1Light;
+#if FAN1_REMOTE_TYPE == REMOTE_TR313A
+uint32_t rfCodeFan1Low, rfCodeFan1Medium, rfCodeFan1High;
+#else
+uint32_t rfCodeFan1Speed[FAN1_MAX_SPEED]; // index 0..5 = speed 1..6
+#endif
+
+void computeRfCodesFan1() {
+#if FAN1_REMOTE_TYPE == REMOTE_TR313A
+  uint8_t addr1 = dipAddressNibble(DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4);
+  rfCodeFan1Low    = RF_CODE_FAN_LOW_BASE    | addr1;
+  rfCodeFan1Medium = RF_CODE_FAN_MEDIUM_BASE | addr1;
+  rfCodeFan1High   = RF_CODE_FAN_HIGH_BASE   | addr1;
+  rfCodeFan1Off    = RF_CODE_FAN_OFF_BASE    | addr1;
+  rfCodeFan1Light  = RF_CODE_LIGHT_BASE      | addr1;
+#else // REMOTE_SST12 -- fixed codes, no DIP address
+  rfCodeFan1Off      = FAN1_RF_CODE_OFF;
+  rfCodeFan1Light    = FAN1_RF_CODE_LIGHT;
+  rfCodeFan1Speed[0] = FAN1_RF_CODE_SPEED1;
+  rfCodeFan1Speed[1] = FAN1_RF_CODE_SPEED2;
+  rfCodeFan1Speed[2] = FAN1_RF_CODE_SPEED3;
+  rfCodeFan1Speed[3] = FAN1_RF_CODE_SPEED4;
+  rfCodeFan1Speed[4] = FAN1_RF_CODE_SPEED5;
+  rfCodeFan1Speed[5] = FAN1_RF_CODE_SPEED6;
+#endif
+}
+
+// Fan 2 code storage -- same shape as fan 1's above.
 uint32_t rfCodeFan2Off;
 uint32_t rfCodeFan2Light; // only meaningful/sent if LIGHT2_ID is defined
 #if FAN2_REMOTE_TYPE == REMOTE_TR313A
@@ -381,9 +422,9 @@ void checkLedBlink() {
 // ELECHOUSE_CC1101_SRC_DRV's SetTx(float) implementation: it does
 // SIDLE -> setMHZ() -> STX as one atomic sequence).
 void tuneRadioForFan1() {
-  ELECHOUSE_cc1101.SetTx(RF_MHZ);
-  myRadio.setProtocol(RF_PROTOCOL);
-  myRadio.setPulseLength(RF_PULSE_US);
+  ELECHOUSE_cc1101.SetTx(FAN1_RF_MHZ);
+  myRadio.setProtocol(FAN1_RF_PROTOCOL);
+  myRadio.setPulseLength(FAN1_RF_PULSE_US);
 }
 
 void tuneRadioForFan2() {
@@ -394,12 +435,20 @@ void tuneRadioForFan2() {
 
 void sendFan1Code(int speed) {
   tuneRadioForFan1();
+#if FAN1_REMOTE_TYPE == REMOTE_TR313A
   switch (speed) {
-    case 1: myRadio.send(rfCodeFanLow, RF_BITLENGTH); break;
-    case 2: myRadio.send(rfCodeFanMedium, RF_BITLENGTH); break;
-    case 3: myRadio.send(rfCodeFanHigh, RF_BITLENGTH); break;
-    default: myRadio.send(rfCodeFanOff, RF_BITLENGTH); break;
+    case 1: myRadio.send(rfCodeFan1Low, FAN1_RF_BITLENGTH); break;
+    case 2: myRadio.send(rfCodeFan1Medium, FAN1_RF_BITLENGTH); break;
+    case 3: myRadio.send(rfCodeFan1High, FAN1_RF_BITLENGTH); break;
+    default: myRadio.send(rfCodeFan1Off, FAN1_RF_BITLENGTH); break;
   }
+#else
+  if (speed >= 1 && speed <= FAN1_MAX_SPEED) {
+    myRadio.send(rfCodeFan1Speed[speed - 1], FAN1_RF_BITLENGTH);
+  } else {
+    myRadio.send(rfCodeFan1Off, FAN1_RF_BITLENGTH);
+  }
+#endif
   ledBlinkStart();
 }
 
@@ -435,10 +484,10 @@ bool onFan1PowerState(const String &deviceId, bool &state) {
   return true;
 }
 
-// "set the fan to low/medium/high" -- range is 1..3
+// "set the fan speed" -- range is 1..FAN1_MAX_SPEED
 bool onFan1RangeValue(const String &deviceId, int &rangeValue) {
   if (rangeValue < 1) rangeValue = 1;
-  if (rangeValue > 3) rangeValue = 3;
+  if (rangeValue > FAN1_MAX_SPEED) rangeValue = FAN1_MAX_SPEED;
   fan1Speed = rangeValue;
   logf("Fan 1 speed set to %d", fan1Speed);
   sendFan1Code(fan1Speed);
@@ -447,7 +496,7 @@ bool onFan1RangeValue(const String &deviceId, int &rangeValue) {
 
 // relative changes, e.g. "increase the fan speed"
 bool onFan1AdjustRangeValue(const String &deviceId, int &rangeValueDelta) {
-  fan1Speed = constrain(fan1Speed + rangeValueDelta, 1, 3);
+  fan1Speed = constrain(fan1Speed + rangeValueDelta, 1, FAN1_MAX_SPEED);
   logf("Fan 1 speed adjusted by %d to %d", rangeValueDelta, fan1Speed);
   sendFan1Code(fan1Speed);
   rangeValueDelta = fan1Speed; // must return the new absolute value
@@ -484,7 +533,7 @@ bool onLightPowerState(const String &deviceId, bool &state) {
        state ? "ON" : "OFF", lightState ? "ON" : "OFF");
   if (state != lightState) {
     tuneRadioForFan1();
-    myRadio.send(rfCodeLight, RF_BITLENGTH);
+    myRadio.send(rfCodeFan1Light, FAN1_RF_BITLENGTH);
     ledBlinkStart();
     lightState = state;
   }
@@ -756,11 +805,17 @@ void setup() {
 
   checkUnexpectedReset();
 
-  computeRfCodes();
+  computeRfCodesFan1();
+#if FAN1_REMOTE_TYPE == REMOTE_TR313A
   logf("Fan 1 DIP switches %d%d%d%d -> address nibble %d -> low=%u med=%u high=%u off=%u light=%u",
        DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4,
        dipAddressNibble(DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4),
-       rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight);
+       rfCodeFan1Low, rfCodeFan1Medium, rfCodeFan1High, rfCodeFan1Off, rfCodeFan1Light);
+#else
+  logf("Fan 1 (SST12) codes -> off=%u s1=%u s2=%u s3=%u s4=%u s5=%u s6=%u",
+       rfCodeFan1Off, rfCodeFan1Speed[0], rfCodeFan1Speed[1], rfCodeFan1Speed[2],
+       rfCodeFan1Speed[3], rfCodeFan1Speed[4], rfCodeFan1Speed[5]);
+#endif
 
   computeRfCodesFan2();
 #if FAN2_REMOTE_TYPE == REMOTE_TR313A
