@@ -19,7 +19,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-27r1"
+#define FIRMWARE_VERSION "2026-09-03r1"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -610,6 +610,23 @@ void setupRadio() {
   // Init() brings up SPI.begin() on the custom pins, so it must run before
   // any register read/write, including getCC1101().
   ELECHOUSE_cc1101.Init();
+
+  // Raw register dump, logged regardless of pass/fail -- getCC1101() only
+  // reports VERSION > 0 && < 255, which collapses genuinely different
+  // failure signatures into one "not available" message. 0xFF on both
+  // PARTNUM and VERSION means MISO is stuck high (floating/unconnected --
+  // no power, no module, or MISO never actually wired to the CS line's
+  // chip). 0x00 on both usually means MISO is stuck low instead (a
+  // different wiring fault, or CS not toggling). A genuine CC1101
+  // reads PARTNUM=0x00, VERSION=0x14 (some clones report 0x04/0x05) --
+  // anything else non-trivial suggests a real chip responding but wrong
+  // pins/orientation scrambling the bus (e.g. the module seated backwards
+  // in the symmetric 2x4 socket, swapping which physical pin is which
+  // signal).
+  byte cc1101PartNum = ELECHOUSE_cc1101.SpiReadStatus(CC1101_PARTNUM);
+  byte cc1101Version = ELECHOUSE_cc1101.SpiReadStatus(CC1101_VERSION);
+  logf("CC1101 raw registers: PARTNUM=0x%02X VERSION=0x%02X (genuine CC1101: "
+       "PARTNUM=0x00, VERSION=0x14)", cc1101PartNum, cc1101Version);
 
   radioAvailable = ELECHOUSE_cc1101.getCC1101();
   if (radioAvailable) {

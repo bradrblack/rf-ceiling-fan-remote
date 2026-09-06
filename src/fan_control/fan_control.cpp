@@ -16,11 +16,16 @@
 #include "SinricProFanUS.h"
 #include "SinricProSwitch.h"
 
+// Remote family identifiers for FAN2_REMOTE_TYPE (chosen in secrets.h),
+// defined before that include so the choice reads normally top-to-bottom.
+#define REMOTE_TR313A 1
+#define REMOTE_SST12  2
+
 #include "secrets.h"
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-08-27r1"
+#define FIRMWARE_VERSION "2026-09-05r1"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -87,6 +92,60 @@ void computeRfCodes() {
 }
 
 // ==========================================
+// Fan 2 (second physical fan, different remote family)
+// ==========================================
+// Fan 2's remote is picked per-build in secrets.h via FAN2_REMOTE_TYPE, so
+// the same firmware can drive either a second TR313A-style fan (DIP-switch
+// addressed, same code family as fan 1) or a NOMA SST12 remote (paired
+// directly to the fan's receiver -- no DIP switches, one fixed code per
+// button). Fan 2 has no light device: its light is on the wall switch.
+#ifndef FAN2_REMOTE_TYPE
+#define FAN2_REMOTE_TYPE REMOTE_SST12
+#endif
+
+#if FAN2_REMOTE_TYPE == REMOTE_TR313A
+// Same RF family as fan 1 -- just a different DIP address nibble
+// (FAN2_DIP_SWITCH_1..4 in secrets.h).
+#define FAN2_RF_MHZ       RF_MHZ
+#define FAN2_RF_PROTOCOL  RF_PROTOCOL
+#define FAN2_RF_PULSE_US  RF_PULSE_US
+#define FAN2_RF_BITLENGTH RF_BITLENGTH
+#elif FAN2_REMOTE_TYPE == REMOTE_SST12
+// TODO: placeholders -- capture real values with sniff.ino (env:c3_mini)
+// against the SST12 remote's low/medium/high/off buttons the same way the
+// fan 1 TR313A codes above were captured, then update these three and the
+// FAN2_RF_CODE_* values in secrets.h.example / secrets.h. If sniff.ino
+// doesn't report a matching built-in rc-switch protocol number for it,
+// come back and swap FAN2_RF_PROTOCOL for a custom RCSwitch::Protocol
+// struct (see RCSwitch.h) built from the raw pulse timings instead --
+// these #defines assume a built-in protocol number is found.
+#define FAN2_RF_MHZ       433.92
+#define FAN2_RF_PROTOCOL  1
+#define FAN2_RF_PULSE_US  350
+#define FAN2_RF_BITLENGTH 24
+#else
+#error "Unknown FAN2_REMOTE_TYPE -- must be REMOTE_TR313A or REMOTE_SST12"
+#endif
+
+uint16_t rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High, rfCodeFan2Off;
+
+void computeRfCodesFan2() {
+#if FAN2_REMOTE_TYPE == REMOTE_TR313A
+  uint8_t addr2 = dipAddressNibble(FAN2_DIP_SWITCH_1, FAN2_DIP_SWITCH_2,
+                                    FAN2_DIP_SWITCH_3, FAN2_DIP_SWITCH_4);
+  rfCodeFan2Low    = RF_CODE_FAN_LOW_BASE    | addr2;
+  rfCodeFan2Medium = RF_CODE_FAN_MEDIUM_BASE | addr2;
+  rfCodeFan2High   = RF_CODE_FAN_HIGH_BASE   | addr2;
+  rfCodeFan2Off    = RF_CODE_FAN_OFF_BASE    | addr2;
+#else // REMOTE_SST12 -- fixed codes, no DIP address
+  rfCodeFan2Low    = FAN2_RF_CODE_LOW;
+  rfCodeFan2Medium = FAN2_RF_CODE_MEDIUM;
+  rfCodeFan2High   = FAN2_RF_CODE_HIGH;
+  rfCodeFan2Off    = FAN2_RF_CODE_OFF;
+#endif
+}
+
+// ==========================================
 // Reliability: WiFi watchdog + daily reboot
 // ==========================================
 // If WiFi can't (re)connect within this long, or stays disconnected this
@@ -107,7 +166,8 @@ unsigned long sinricDownSince = 0;
 // Periodically confirms the CC1101 is still answering over SPI (same
 // VERSION-register check used at boot). Catches the radio silently wedging
 // mid-operation -- SinricPro/WiFi stay up (Google still hears an ack "beep")
-// but sendFanCode()/onLightPowerState() stop actually transmitting anything.
+// but sendFan1Code()/sendFan2Code()/onLightPowerState() stop actually
+// transmitting anything.
 const unsigned long RADIO_CHECK_INTERVAL_MS = 60000;
 unsigned long lastRadioCheck = 0;
 
@@ -263,7 +323,8 @@ void notifyLastReboot() {
 RCSwitch myRadio = RCSwitch();
 
 // Fan speed is tracked so onAdjustRangeValue can compute a new absolute value.
-int fanSpeed = 0; // 0 = off, 1..3 = low/medium/high
+int fan1Speed = 0; // 0 = off, 1..3 = low/medium/high
+int fan2Speed = 0;
 
 // The physical remote only has a single LIGHT TOGGLE code, not separate
 // on/off codes, so we track assumed state locally and only fire the toggle
@@ -291,12 +352,32 @@ void checkLedBlink() {
   }
 }
 
-void sendFanCode(int speed) {
+// Fan 1 and fan 2 can be on different RF families (different frequency,
+// rc-switch protocol, and pulse length), so each send re-applies its fan's
+// radio config immediately before transmitting rather than assuming
+// whatever the radio was last left configured for.
+void sendFan1Code(int speed) {
+  ELECHOUSE_cc1101.setMHZ(RF_MHZ);
+  myRadio.setProtocol(RF_PROTOCOL);
+  myRadio.setPulseLength(RF_PULSE_US);
   switch (speed) {
     case 1: myRadio.send(rfCodeFanLow, RF_BITLENGTH); break;
     case 2: myRadio.send(rfCodeFanMedium, RF_BITLENGTH); break;
     case 3: myRadio.send(rfCodeFanHigh, RF_BITLENGTH); break;
     default: myRadio.send(rfCodeFanOff, RF_BITLENGTH); break;
+  }
+  ledBlinkStart();
+}
+
+void sendFan2Code(int speed) {
+  ELECHOUSE_cc1101.setMHZ(FAN2_RF_MHZ);
+  myRadio.setProtocol(FAN2_RF_PROTOCOL);
+  myRadio.setPulseLength(FAN2_RF_PULSE_US);
+  switch (speed) {
+    case 1: myRadio.send(rfCodeFan2Low, FAN2_RF_BITLENGTH); break;
+    case 2: myRadio.send(rfCodeFan2Medium, FAN2_RF_BITLENGTH); break;
+    case 3: myRadio.send(rfCodeFan2High, FAN2_RF_BITLENGTH); break;
+    default: myRadio.send(rfCodeFan2Off, FAN2_RF_BITLENGTH); break;
   }
   ledBlinkStart();
 }
@@ -307,34 +388,53 @@ void sendFanCode(int speed) {
 
 // "turn on/off the fan" -- the remote has no generic power-on code, so
 // powering on defaults to LOW speed.
-bool onFanPowerState(const String &deviceId, bool &state) {
-  logf("Fan power: %s", state ? "ON" : "OFF");
-  if (state) {
-    fanSpeed = 1;
-    sendFanCode(fanSpeed);
-  } else {
-    fanSpeed = 0;
-    sendFanCode(fanSpeed);
-  }
+bool onFan1PowerState(const String &deviceId, bool &state) {
+  logf("Fan 1 power: %s", state ? "ON" : "OFF");
+  fan1Speed = state ? 1 : 0;
+  sendFan1Code(fan1Speed);
   return true;
 }
 
 // "set the fan to low/medium/high" -- range is 1..3
-bool onFanRangeValue(const String &deviceId, int &rangeValue) {
+bool onFan1RangeValue(const String &deviceId, int &rangeValue) {
   if (rangeValue < 1) rangeValue = 1;
   if (rangeValue > 3) rangeValue = 3;
-  fanSpeed = rangeValue;
-  logf("Fan speed set to %d", fanSpeed);
-  sendFanCode(fanSpeed);
+  fan1Speed = rangeValue;
+  logf("Fan 1 speed set to %d", fan1Speed);
+  sendFan1Code(fan1Speed);
   return true;
 }
 
 // relative changes, e.g. "increase the fan speed"
-bool onFanAdjustRangeValue(const String &deviceId, int &rangeValueDelta) {
-  fanSpeed = constrain(fanSpeed + rangeValueDelta, 1, 3);
-  logf("Fan speed adjusted by %d to %d", rangeValueDelta, fanSpeed);
-  sendFanCode(fanSpeed);
-  rangeValueDelta = fanSpeed; // must return the new absolute value
+bool onFan1AdjustRangeValue(const String &deviceId, int &rangeValueDelta) {
+  fan1Speed = constrain(fan1Speed + rangeValueDelta, 1, 3);
+  logf("Fan 1 speed adjusted by %d to %d", rangeValueDelta, fan1Speed);
+  sendFan1Code(fan1Speed);
+  rangeValueDelta = fan1Speed; // must return the new absolute value
+  return true;
+}
+
+bool onFan2PowerState(const String &deviceId, bool &state) {
+  logf("Fan 2 power: %s", state ? "ON" : "OFF");
+  fan2Speed = state ? 1 : 0;
+  sendFan2Code(fan2Speed);
+  return true;
+}
+
+bool onFan2RangeValue(const String &deviceId, int &rangeValue) {
+  if (rangeValue < 1) rangeValue = 1;
+  if (rangeValue > 3) rangeValue = 3;
+  fan2Speed = rangeValue;
+  logf("Fan 2 speed set to %d", fan2Speed);
+  sendFan2Code(fan2Speed);
+  return true;
+}
+
+bool onFan2AdjustRangeValue(const String &deviceId, int &rangeValueDelta) {
+  fan2Speed = constrain(fan2Speed + rangeValueDelta, 1, 3);
+  logf("Fan 2 speed adjusted by %d to %d", rangeValueDelta, fan2Speed);
+  sendFan2Code(fan2Speed);
+  rangeValueDelta = fan2Speed;
   return true;
 }
 
@@ -486,7 +586,8 @@ void checkSinricWatchdog() {
 
 // Reboots if the CC1101 stops answering over SPI mid-operation. This is the
 // failure mode where SinricPro/WiFi stay connected (Google still hears an
-// ack) but sendFanCode()/onLightPowerState() silently stop transmitting.
+// ack) but sendFan1Code()/sendFan2Code()/onLightPowerState() silently stop
+// transmitting.
 void checkRadioWatchdog() {
   if (millis() - lastRadioCheck < RADIO_CHECK_INTERVAL_MS) return;
   lastRadioCheck = millis();
@@ -548,12 +649,18 @@ void checkDailyReboot() {
 
 void setupSinricPro() {
   SinricProFanUS &myFan = SinricPro[FAN_ID];
-  myFan.onPowerState(onFanPowerState);
-  myFan.onRangeValue(onFanRangeValue);
-  myFan.onAdjustRangeValue(onFanAdjustRangeValue);
+  myFan.onPowerState(onFan1PowerState);
+  myFan.onRangeValue(onFan1RangeValue);
+  myFan.onAdjustRangeValue(onFan1AdjustRangeValue);
 
   SinricProSwitch &myLight = SinricPro[LIGHT_ID];
   myLight.onPowerState(onLightPowerState);
+
+  // Fan 2 has no light device -- its light stays on the wall switch.
+  SinricProFanUS &myFan2 = SinricPro[FAN2_ID];
+  myFan2.onPowerState(onFan2PowerState);
+  myFan2.onRangeValue(onFan2RangeValue);
+  myFan2.onAdjustRangeValue(onFan2AdjustRangeValue);
 
   SinricPro.onConnected([]() { logf("Connected to SinricPro"); });
   SinricPro.onDisconnected([]() { logf("Disconnected from SinricPro"); });
@@ -582,10 +689,20 @@ void setup() {
   checkUnexpectedReset();
 
   computeRfCodes();
-  logf("DIP switches %d%d%d%d -> address nibble %d -> low=%u med=%u high=%u off=%u light=%u",
+  logf("Fan 1 DIP switches %d%d%d%d -> address nibble %d -> low=%u med=%u high=%u off=%u light=%u",
        DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4,
        dipAddressNibble(DIP_SWITCH_1, DIP_SWITCH_2, DIP_SWITCH_3, DIP_SWITCH_4),
        rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight);
+
+  computeRfCodesFan2();
+#if FAN2_REMOTE_TYPE == REMOTE_TR313A
+  logf("Fan 2 (TR313A) DIP switches %d%d%d%d -> low=%u med=%u high=%u off=%u",
+       FAN2_DIP_SWITCH_1, FAN2_DIP_SWITCH_2, FAN2_DIP_SWITCH_3, FAN2_DIP_SWITCH_4,
+       rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High, rfCodeFan2Off);
+#else
+  logf("Fan 2 (SST12) codes -> low=%u med=%u high=%u off=%u",
+       rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High, rfCodeFan2Off);
+#endif
 
   setupRadio();
   setupWiFi();
