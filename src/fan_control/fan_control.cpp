@@ -25,7 +25,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-09-05r1"
+#define FIRMWARE_VERSION "2026-09-05r2"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -105,29 +105,37 @@ void computeRfCodes() {
 
 #if FAN2_REMOTE_TYPE == REMOTE_TR313A
 // Same RF family as fan 1 -- just a different DIP address nibble
-// (FAN2_DIP_SWITCH_1..4 in secrets.h).
+// (FAN2_DIP_SWITCH_1..4 in secrets.h). Only 3 speeds (low/medium/high),
+// same as fan 1's remote family.
 #define FAN2_RF_MHZ       RF_MHZ
 #define FAN2_RF_PROTOCOL  RF_PROTOCOL
 #define FAN2_RF_PULSE_US  RF_PULSE_US
 #define FAN2_RF_BITLENGTH RF_BITLENGTH
+#define FAN2_MAX_SPEED    3
 #elif FAN2_REMOTE_TYPE == REMOTE_SST12
-// TODO: placeholders -- capture real values with sniff.ino (env:c3_mini)
-// against the SST12 remote's low/medium/high/off buttons the same way the
-// fan 1 TR313A codes above were captured, then update these three and the
-// FAN2_RF_CODE_* values in secrets.h.example / secrets.h. If sniff.ino
-// doesn't report a matching built-in rc-switch protocol number for it,
-// come back and swap FAN2_RF_PROTOCOL for a custom RCSwitch::Protocol
-// struct (see RCSwitch.h) built from the raw pulse timings instead --
-// these #defines assume a built-in protocol number is found.
+// Captured with sniff.ino (env:c3_mini) at 433.92MHz against a real NOMA
+// SST12 remote -- Off plus 6 discrete speed buttons (no combined
+// low/medium/high; this remote has its own dedicated button per speed),
+// each decoding cleanly and repeatably via rc-switch's built-in protocol
+// 1, no custom RCSwitch::Protocol needed. The remote also has a Light
+// toggle (captured as 434640969, same bit length/protocol/pulse length)
+// but fan 2's light stays on the wall switch, so it isn't wired up here.
+// The actual per-button codes live in FAN2_RF_CODE_* in secrets.h.
 #define FAN2_RF_MHZ       433.92
 #define FAN2_RF_PROTOCOL  1
-#define FAN2_RF_PULSE_US  350
-#define FAN2_RF_BITLENGTH 24
+#define FAN2_RF_PULSE_US  257
+#define FAN2_RF_BITLENGTH 32
+#define FAN2_MAX_SPEED    6
 #else
 #error "Unknown FAN2_REMOTE_TYPE -- must be REMOTE_TR313A or REMOTE_SST12"
 #endif
 
-uint16_t rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High, rfCodeFan2Off;
+uint32_t rfCodeFan2Off;
+#if FAN2_REMOTE_TYPE == REMOTE_TR313A
+uint32_t rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High;
+#else
+uint32_t rfCodeFan2Speed[FAN2_MAX_SPEED]; // index 0..5 = speed 1..6
+#endif
 
 void computeRfCodesFan2() {
 #if FAN2_REMOTE_TYPE == REMOTE_TR313A
@@ -138,10 +146,13 @@ void computeRfCodesFan2() {
   rfCodeFan2High   = RF_CODE_FAN_HIGH_BASE   | addr2;
   rfCodeFan2Off    = RF_CODE_FAN_OFF_BASE    | addr2;
 #else // REMOTE_SST12 -- fixed codes, no DIP address
-  rfCodeFan2Low    = FAN2_RF_CODE_LOW;
-  rfCodeFan2Medium = FAN2_RF_CODE_MEDIUM;
-  rfCodeFan2High   = FAN2_RF_CODE_HIGH;
-  rfCodeFan2Off    = FAN2_RF_CODE_OFF;
+  rfCodeFan2Off      = FAN2_RF_CODE_OFF;
+  rfCodeFan2Speed[0] = FAN2_RF_CODE_SPEED1;
+  rfCodeFan2Speed[1] = FAN2_RF_CODE_SPEED2;
+  rfCodeFan2Speed[2] = FAN2_RF_CODE_SPEED3;
+  rfCodeFan2Speed[3] = FAN2_RF_CODE_SPEED4;
+  rfCodeFan2Speed[4] = FAN2_RF_CODE_SPEED5;
+  rfCodeFan2Speed[5] = FAN2_RF_CODE_SPEED6;
 #endif
 }
 
@@ -373,12 +384,20 @@ void sendFan2Code(int speed) {
   ELECHOUSE_cc1101.setMHZ(FAN2_RF_MHZ);
   myRadio.setProtocol(FAN2_RF_PROTOCOL);
   myRadio.setPulseLength(FAN2_RF_PULSE_US);
+#if FAN2_REMOTE_TYPE == REMOTE_TR313A
   switch (speed) {
     case 1: myRadio.send(rfCodeFan2Low, FAN2_RF_BITLENGTH); break;
     case 2: myRadio.send(rfCodeFan2Medium, FAN2_RF_BITLENGTH); break;
     case 3: myRadio.send(rfCodeFan2High, FAN2_RF_BITLENGTH); break;
     default: myRadio.send(rfCodeFan2Off, FAN2_RF_BITLENGTH); break;
   }
+#else
+  if (speed >= 1 && speed <= FAN2_MAX_SPEED) {
+    myRadio.send(rfCodeFan2Speed[speed - 1], FAN2_RF_BITLENGTH);
+  } else {
+    myRadio.send(rfCodeFan2Off, FAN2_RF_BITLENGTH);
+  }
+#endif
   ledBlinkStart();
 }
 
@@ -423,7 +442,7 @@ bool onFan2PowerState(const String &deviceId, bool &state) {
 
 bool onFan2RangeValue(const String &deviceId, int &rangeValue) {
   if (rangeValue < 1) rangeValue = 1;
-  if (rangeValue > 3) rangeValue = 3;
+  if (rangeValue > FAN2_MAX_SPEED) rangeValue = FAN2_MAX_SPEED;
   fan2Speed = rangeValue;
   logf("Fan 2 speed set to %d", fan2Speed);
   sendFan2Code(fan2Speed);
@@ -431,7 +450,7 @@ bool onFan2RangeValue(const String &deviceId, int &rangeValue) {
 }
 
 bool onFan2AdjustRangeValue(const String &deviceId, int &rangeValueDelta) {
-  fan2Speed = constrain(fan2Speed + rangeValueDelta, 1, 3);
+  fan2Speed = constrain(fan2Speed + rangeValueDelta, 1, FAN2_MAX_SPEED);
   logf("Fan 2 speed adjusted by %d to %d", rangeValueDelta, fan2Speed);
   sendFan2Code(fan2Speed);
   rangeValueDelta = fan2Speed;
@@ -700,8 +719,9 @@ void setup() {
        FAN2_DIP_SWITCH_1, FAN2_DIP_SWITCH_2, FAN2_DIP_SWITCH_3, FAN2_DIP_SWITCH_4,
        rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High, rfCodeFan2Off);
 #else
-  logf("Fan 2 (SST12) codes -> low=%u med=%u high=%u off=%u",
-       rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High, rfCodeFan2Off);
+  logf("Fan 2 (SST12) codes -> off=%u s1=%u s2=%u s3=%u s4=%u s5=%u s6=%u",
+       rfCodeFan2Off, rfCodeFan2Speed[0], rfCodeFan2Speed[1], rfCodeFan2Speed[2],
+       rfCodeFan2Speed[3], rfCodeFan2Speed[4], rfCodeFan2Speed[5]);
 #endif
 
   setupRadio();
