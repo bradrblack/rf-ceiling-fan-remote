@@ -25,7 +25,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-09-05r2"
+#define FIRMWARE_VERSION "2026-09-05r3"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -131,6 +131,7 @@ void computeRfCodes() {
 #endif
 
 uint32_t rfCodeFan2Off;
+uint32_t rfCodeFan2Light; // only meaningful/sent if LIGHT2_ID is defined
 #if FAN2_REMOTE_TYPE == REMOTE_TR313A
 uint32_t rfCodeFan2Low, rfCodeFan2Medium, rfCodeFan2High;
 #else
@@ -145,8 +146,10 @@ void computeRfCodesFan2() {
   rfCodeFan2Medium = RF_CODE_FAN_MEDIUM_BASE | addr2;
   rfCodeFan2High   = RF_CODE_FAN_HIGH_BASE   | addr2;
   rfCodeFan2Off    = RF_CODE_FAN_OFF_BASE    | addr2;
+  rfCodeFan2Light  = RF_CODE_LIGHT_BASE      | addr2;
 #else // REMOTE_SST12 -- fixed codes, no DIP address
   rfCodeFan2Off      = FAN2_RF_CODE_OFF;
+  rfCodeFan2Light    = FAN2_RF_CODE_LIGHT;
   rfCodeFan2Speed[0] = FAN2_RF_CODE_SPEED1;
   rfCodeFan2Speed[1] = FAN2_RF_CODE_SPEED2;
   rfCodeFan2Speed[2] = FAN2_RF_CODE_SPEED3;
@@ -364,13 +367,33 @@ void checkLedBlink() {
 }
 
 // Fan 1 and fan 2 can be on different RF families (different frequency,
-// rc-switch protocol, and pulse length), so each send re-applies its fan's
-// radio config immediately before transmitting rather than assuming
-// whatever the radio was last left configured for.
-void sendFan1Code(int speed) {
-  ELECHOUSE_cc1101.setMHZ(RF_MHZ);
+// rc-switch protocol, and pulse length), so anything transmitting on
+// either fan's behalf -- including the light toggles -- must re-tune the
+// radio to that fan's family immediately beforehand, rather than assuming
+// whatever the radio was last left configured for. Centralized here after
+// a real bug: onLightPowerState() sending without re-tuning worked fine
+// before fan 2 existed, but silently broke once fan 2's sends could leave
+// the radio parked on a different frequency/protocol.
+//
+// SetTx(mhz), not setMHZ(mhz) -- setMHZ() alone only rewrites the
+// frequency registers without re-strobing the chip back into TX state,
+// which left the radio stuck out of TX after the first fan2 send (see
+// ELECHOUSE_CC1101_SRC_DRV's SetTx(float) implementation: it does
+// SIDLE -> setMHZ() -> STX as one atomic sequence).
+void tuneRadioForFan1() {
+  ELECHOUSE_cc1101.SetTx(RF_MHZ);
   myRadio.setProtocol(RF_PROTOCOL);
   myRadio.setPulseLength(RF_PULSE_US);
+}
+
+void tuneRadioForFan2() {
+  ELECHOUSE_cc1101.SetTx(FAN2_RF_MHZ);
+  myRadio.setProtocol(FAN2_RF_PROTOCOL);
+  myRadio.setPulseLength(FAN2_RF_PULSE_US);
+}
+
+void sendFan1Code(int speed) {
+  tuneRadioForFan1();
   switch (speed) {
     case 1: myRadio.send(rfCodeFanLow, RF_BITLENGTH); break;
     case 2: myRadio.send(rfCodeFanMedium, RF_BITLENGTH); break;
@@ -381,9 +404,7 @@ void sendFan1Code(int speed) {
 }
 
 void sendFan2Code(int speed) {
-  ELECHOUSE_cc1101.setMHZ(FAN2_RF_MHZ);
-  myRadio.setProtocol(FAN2_RF_PROTOCOL);
-  myRadio.setPulseLength(FAN2_RF_PULSE_US);
+  tuneRadioForFan2();
 #if FAN2_REMOTE_TYPE == REMOTE_TR313A
   switch (speed) {
     case 1: myRadio.send(rfCodeFan2Low, FAN2_RF_BITLENGTH); break;
@@ -462,12 +483,29 @@ bool onLightPowerState(const String &deviceId, bool &state) {
   logf("Light requested: %s (currently tracked as %s)",
        state ? "ON" : "OFF", lightState ? "ON" : "OFF");
   if (state != lightState) {
+    tuneRadioForFan1();
     myRadio.send(rfCodeLight, RF_BITLENGTH);
     ledBlinkStart();
     lightState = state;
   }
   return true;
 }
+
+#ifdef LIGHT2_ID
+bool light2State = false;
+
+bool onLight2PowerState(const String &deviceId, bool &state) {
+  logf("Light 2 requested: %s (currently tracked as %s)",
+       state ? "ON" : "OFF", light2State ? "ON" : "OFF");
+  if (state != light2State) {
+    tuneRadioForFan2();
+    myRadio.send(rfCodeFan2Light, FAN2_RF_BITLENGTH);
+    ledBlinkStart();
+    light2State = state;
+  }
+  return true;
+}
+#endif
 
 // ==========================================
 // Setup
@@ -675,11 +713,22 @@ void setupSinricPro() {
   SinricProSwitch &myLight = SinricPro[LIGHT_ID];
   myLight.onPowerState(onLightPowerState);
 
-  // Fan 2 has no light device -- its light stays on the wall switch.
+  // Fan 2's fan and light devices are each independently optional --
+  // define FAN2_ID and/or LIGHT2_ID in secrets.h to enable them. This
+  // lets you pick fan-only, light-only, or both depending on how many
+  // SinricPro devices you want to stay within (see the free-tier device
+  // limit).
+#ifdef FAN2_ID
   SinricProFanUS &myFan2 = SinricPro[FAN2_ID];
   myFan2.onPowerState(onFan2PowerState);
   myFan2.onRangeValue(onFan2RangeValue);
   myFan2.onAdjustRangeValue(onFan2AdjustRangeValue);
+#endif
+
+#ifdef LIGHT2_ID
+  SinricProSwitch &myLight2 = SinricPro[LIGHT2_ID];
+  myLight2.onPowerState(onLight2PowerState);
+#endif
 
   SinricPro.onConnected([]() { logf("Connected to SinricPro"); });
   SinricPro.onDisconnected([]() { logf("Disconnected from SinricPro"); });
