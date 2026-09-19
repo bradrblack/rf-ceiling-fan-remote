@@ -143,7 +143,7 @@ board_t = 1.6;             // standard PCB thickness
 //                   ESP32 module and C1 (the radial cap at kicad (88,46.19),
 //                   local (34.25, 8.19)) -- checked clear of both modules
 //                   and the cap by real margin, not just eyeballed. Y
-//                   positions (kicad 42.5/59.25, local 4.5/21.25) aren't
+//                   positions (kicad 42.5/59.25, local 19.5/2.75, Y flipped) aren't
 //                   symmetric like far_holes' -- they're wherever the
 //                   real routing leaves the most room: two long signal
 //                   traces run almost the board's full width right
@@ -175,7 +175,13 @@ board_t = 1.6;             // standard PCB thickness
 //                   (kicad Y 41.5/58.5, i.e. local Y 3.5/20.5) with real
 //                   margin, not just inside the board outline.
 far_holes = [[53.75, 3.5], [53.75, 20.5]];
-middle_holes = [[27.25, 4.5], [27.25, 21.25]];
+// Y is flipped versus kicad: kicad's Y axis points DOWN the screen, this
+// file's points up. Local Y = 62 - kicad Y (board Edge.Cuts spans kicad Y
+// 38-62), so kicad (81, 42.5)/(81, 59.25) -- confirmed against the
+// fabricated board's NPTH drill file -- land at local Y 19.5/2.75. An
+// earlier version used Y - 38 (no flip), which is invisible for the
+// symmetric far/near holes but put these asymmetric ones mirrored.
+middle_holes = [[27.25, 19.5], [27.25, 2.75]];
 near_holes = [[3.75, 8], [3.75, 16]];
 mount_holes = concat(far_holes, middle_holes, near_holes);
 mount_hole_d = 2.5;
