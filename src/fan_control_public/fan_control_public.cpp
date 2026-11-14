@@ -19,7 +19,7 @@
 
 // Bump this on each flash you want to be able to identify later (e.g. to
 // confirm an OTA update actually took) -- format: YYYY-MM-DDrN.
-#define FIRMWARE_VERSION "2026-09-03r1"
+#define FIRMWARE_VERSION "2026-11-14r1"
 
 const char *BANNER =
 R"(  __  __         _____
@@ -59,11 +59,18 @@ R"(  __  __         _____
 #define LED_BLINK_MS    500
 
 // BOOT button on most ESP32-C3 boards -- confirm yours has one before
-// relying on this. Held for FACTORY_RESET_HOLD_MS during normal operation,
-// it wipes saved WiFi + SinricPro config and reboots into the setup portal
-// (e.g. to move the device to a new WiFi network, or to reach WiFiManager's
-// built-in "Update" page to flash new firmware over the air with no cable).
+// relying on this. Two actions, by how long it's held during normal
+// operation:
+//  - PORTAL_HOLD_MS up to FACTORY_RESET_HOLD_MS, then released: reboots into
+//    the setup portal with everything still saved (change WiFi network or
+//    any field, or reach WiFiManager's "Update" page). The LED blinks once
+//    when the hold reaches PORTAL_HOLD_MS, as the cue to let go.
+//  - FACTORY_RESET_HOLD_MS: wipes saved WiFi + SinricPro config and reboots
+//    into the setup portal.
+// The portal never opens on its own once a WiFi network is saved (see
+// setupWiFiManager()), so this button is the way to reach it.
 #define FACTORY_RESET_PIN      9
+#define PORTAL_HOLD_MS         3000
 #define FACTORY_RESET_HOLD_MS  10000
 
 #define RF_MHZ          304.25
@@ -98,8 +105,15 @@ uint16_t rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight
 // ==========================================
 // Reliability: WiFi + SinricPro + radio watchdogs, daily reboot
 // ==========================================
-const unsigned long WIFI_DOWN_REBOOT_MS = 60000;
+// While WiFi is down, the radio is reset and the saved network retried every
+// WIFI_RETRY_MS (WiFi.setAutoReconnect alone has been seen to stop trying).
+// The reboot watchdog is the backstop behind that, and since a reboot no
+// longer opens the setup portal (see setupWiFiManager()), rebooting during a
+// long router outage just means another retry, never a stuck portal.
+const unsigned long WIFI_RETRY_MS = 30000;
+const unsigned long WIFI_DOWN_REBOOT_MS = 300000; // 5 min
 unsigned long wifiDownSince = 0;
+unsigned long lastWifiAttempt = 0;
 
 // WiFi.status() staying connected doesn't mean SinricPro is reachable --
 // seen in the field: WiFi stayed associated for over an hour while
@@ -289,14 +303,25 @@ void checkLedBlink() {
 // the WiFiManager setup portal. WiFi.disconnect(true, true) mirrors what
 // WiFiManager's own resetSettings() does on ESP32 -- done directly here
 // since the WiFiManager instance itself is local to setupWiFiManager() and
-// out of scope by the time loop() is running.
+// out of scope by the time loop() is running. A shorter hold (PORTAL_HOLD_MS,
+// then released) keeps everything and just reboots into the portal: the
+// "portal" flag in the "fanctl" namespace is picked up by
+// checkPortalRequest() on the next boot.
 unsigned long resetButtonDownSince = 0;
+bool portalHoldSignalled = false;
 
 void checkFactoryResetButton() {
   if (digitalRead(FACTORY_RESET_PIN) == LOW) {
     if (resetButtonDownSince == 0) {
       resetButtonDownSince = millis();
-      logf("Factory reset button pressed -- hold for %lus to reset", FACTORY_RESET_HOLD_MS / 1000);
+      portalHoldSignalled = false;
+      logf("BOOT button pressed -- release after %lus for the setup portal, hold %lus to factory reset",
+           PORTAL_HOLD_MS / 1000, FACTORY_RESET_HOLD_MS / 1000);
+    } else if (!portalHoldSignalled && millis() - resetButtonDownSince > PORTAL_HOLD_MS) {
+      portalHoldSignalled = true;
+      digitalWrite(LED_PIN, LED_ON);   // one blink: "release now for the portal"
+      delay(150);
+      digitalWrite(LED_PIN, LED_OFF);
     } else if (millis() - resetButtonDownSince > FACTORY_RESET_HOLD_MS) {
       logf("Factory reset button held, wiping WiFi/SinricPro config and rebooting...");
       for (int i = 0; i < 6; i++) {
@@ -321,8 +346,29 @@ void checkFactoryResetButton() {
       ESP.restart();
     }
   } else {
+    if (resetButtonDownSince != 0 && millis() - resetButtonDownSince > PORTAL_HOLD_MS) {
+      logf("BOOT button released after %lus, rebooting into the setup portal...",
+           (millis() - resetButtonDownSince) / 1000);
+      prefs.begin("fanctl", false);
+      prefs.putBool("portal", true);
+      prefs.end();
+      recordRebootReason("Setup portal requested (BOOT button)");
+      delay(100);
+      ESP.restart();
+    }
     resetButtonDownSince = 0;
   }
+}
+
+// True (once) if the BOOT button asked for the setup portal before the last
+// reboot. The flag is cleared here so the following boot is a normal one.
+bool checkPortalRequest() {
+  prefs.begin("fanctl", false);
+  bool requested = prefs.getBool("portal", false);
+  if (requested) prefs.remove("portal");
+  prefs.end();
+  if (requested) logf("[WiFi]: setup portal requested with the BOOT button");
+  return requested;
 }
 
 void sendFanCode(int speed) {
@@ -396,11 +442,16 @@ bool onLightPowerState(const String &deviceId, bool &state) {
 // WiFi + SinricPro credential provisioning (WiFiManager)
 // ==========================================
 // Collects WiFi and SinricPro credentials at first boot via a captive
-// portal instead of compiling them in from secrets.h. If saved WiFi
-// credentials ever fail to connect (e.g. the device is moved to a new
-// network), WiFiManager automatically reopens the portal.
+// portal instead of compiling them in from secrets.h. Once a WiFi network
+// is saved, the portal never opens on its own: a failed join (router
+// restarting, power cut that outlasts the router) used to drop the device
+// into the portal, where it sat instead of rejoining. Now it boots anyway
+// and serviceWiFi() retries the saved network every WIFI_RETRY_MS. To
+// change networks, release the BOOT button after a PORTAL_HOLD_MS hold
+// (see checkFactoryResetButton()).
 #define SETUP_AP_NAME "FanControllerSetup"
 #define WIFI_PORTAL_TIMEOUT_SEC 300 // give up and retry rather than hold the portal open forever
+#define WIFI_CONNECT_TIMEOUT_SEC 30 // per attempt at boot; serviceWiFi() keeps retrying after
 #define DEFAULT_HOSTNAME "myfan"
 
 char appKey[40] = "";
@@ -482,7 +533,45 @@ void computeRfCodes() {
        rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight);
 }
 
-void setupWiFiManager() {
+// Join-failure diagnostics, so a device that won't rejoin says why on the
+// serial log instead of just "not connected". The driver's disconnect reason
+// (e.g. 15 = 4-way handshake timeout / wrong password, 201 = network not
+// found, 2/8 = auth expired / left, often weak signal) is logged at most
+// every 10 s, since the driver can fire these back to back.
+unsigned long lastDisconnectLog = 0;
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
+  if (lastDisconnectLog != 0 && millis() - lastDisconnectLog < 10000) return;
+  lastDisconnectLog = millis();
+  logf("[WiFi]: Disconnected / join failed, reason %u", info.wifi_sta_disconnected.reason);
+}
+
+// Scans once and logs whether the saved network is visible and how strong:
+// tells apart "router down / not broadcasting on 2.4 GHz" from "seen but
+// weak" from "seen and strong, so it's the password/security mode".
+void logSavedNetworkScan() {
+  wifi_config_t conf;
+  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK || conf.sta.ssid[0] == 0) {
+    logf("[WiFi]: No saved network to look for");
+    return;
+  }
+  char ssid[33];
+  memcpy(ssid, conf.sta.ssid, 32);
+  ssid[32] = '\0';
+  int n = WiFi.scanNetworks();
+  bool seen = false;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) == ssid) {
+      seen = true;
+      logf("[WiFi]: Saved network \"%s\" seen: RSSI %d dBm, channel %d, auth mode %d",
+           ssid, WiFi.RSSI(i), WiFi.channel(i), (int)WiFi.encryptionType(i));
+    }
+  }
+  if (!seen) logf("[WiFi]: Saved network \"%s\" not seen (%d other networks found)", ssid, n < 0 ? 0 : n);
+  WiFi.scanDelete();
+}
+
+void setupWiFiManager(bool forcePortal) {
   loadSinricConfig();
 
   WiFiManagerParameter customAppKey("appkey", "SinricPro App Key", appKey, sizeof(appKey));
@@ -510,6 +599,7 @@ void setupWiFiManager() {
   wm.addParameter(&customDip4);
   wm.addParameter(&customTz);
   wm.setConfigPortalTimeout(WIFI_PORTAL_TIMEOUT_SEC);
+  wm.setConnectTimeout(WIFI_CONNECT_TIMEOUT_SEC);
 
   // Force a clean radio reset before autoConnect() decides whether to try
   // a normal STA connect or fall back to the AP/portal. Without this, a
@@ -540,15 +630,44 @@ void setupWiFiManager() {
   // Must happen before autoConnect(), since that's what actually associates
   // and does the DHCP handshake (which is when the hostname gets sent).
   WiFi.setHostname(hostname);
+  WiFi.onEvent(onWiFiEvent);
 
-  logf("[WiFi]: Connecting (or opening \"%s\" setup portal if needed)", SETUP_AP_NAME);
-  if (!wm.autoConnect(SETUP_AP_NAME)) {
+  // Read after the driver is up (above) -- it checks the driver's stored
+  // STA config. A device that already has a network saved never opens the
+  // portal on its own; it keeps retrying the saved network instead.
+  bool haveSaved = wm.getWiFiIsSaved();
+  bool portalAllowed = forcePortal || !haveSaved;
+  if (!portalAllowed) wm.setEnableConfigPortal(false);
+
+  bool ok;
+  if (forcePortal) {
+    logf("[WiFi]: Opening \"%s\" setup portal", SETUP_AP_NAME);
+    ok = wm.startConfigPortal(SETUP_AP_NAME);
+  } else if (portalAllowed) {
+    logf("[WiFi]: No network saved, opening \"%s\" setup portal", SETUP_AP_NAME);
+    ok = wm.autoConnect(SETUP_AP_NAME);
+  } else {
+    logf("[WiFi]: Connecting to saved network");
+    ok = wm.autoConnect(SETUP_AP_NAME);
+  }
+
+  if (!ok && portalAllowed) {
     logf("[WiFi]: Setup portal timed out with no connection, rebooting...");
     recordRebootReason("WiFiManager portal timeout");
     delay(100);
     ESP.restart();
   }
-  logf("[WiFi]: IP-Address is %s", WiFi.localIP().toString().c_str());
+  if (ok) {
+    logf("[WiFi]: IP-Address is %s", WiFi.localIP().toString().c_str());
+  } else {
+    // Carry on without WiFi: serviceWiFi() retries every WIFI_RETRY_MS, and
+    // SinricPro connects on its own once the network is back.
+    logSavedNetworkScan();
+    lastWifiAttempt = millis();
+    logf("[WiFi]: Can't join the saved network yet; retrying every %lus "
+         "(hold BOOT %lus and release for the setup portal)",
+         WIFI_RETRY_MS / 1000, PORTAL_HOLD_MS / 1000);
+  }
 
   strncpy(appKey, customAppKey.getValue(), sizeof(appKey) - 1);
   appKey[sizeof(appKey) - 1] = '\0';
@@ -681,8 +800,25 @@ void setupTime() {
   logf("[NTP]: synced: %s", buf);
 }
 
-// Reboots if WiFi has been disconnected for too long. WiFi.setAutoReconnect
-// handles brief drops on its own; this is the backstop for when it doesn't.
+// While WiFi is down, resets the radio and retries the saved network every
+// WIFI_RETRY_MS. A connect attempt can get stuck, so the radio is fully
+// reset first; the TX power cap and hostname are reapplied since the driver
+// restart drops them.
+void serviceWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  if (millis() - lastWifiAttempt < WIFI_RETRY_MS) return;
+  lastWifiAttempt = millis();
+  logf("[WiFi]: Not connected, retrying the saved network");
+  WiFi.disconnect(true);
+  delay(200);
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_max_tx_power(60); // same cap as setupWiFiManager()
+  WiFi.setHostname(hostname);
+  WiFi.begin();
+}
+
+// Reboots if WiFi has been disconnected for too long. serviceWiFi() handles
+// drops on its own; this is the backstop for when it doesn't.
 void checkWiFiWatchdog() {
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiDownSince == 0) {
@@ -835,7 +971,7 @@ void setup() {
   checkUnexpectedReset();
 
   setupRadio();
-  setupWiFiManager();
+  setupWiFiManager(checkPortalRequest());
   setupNetworkExtras();
   setupTime();
   logLastRebootReason();
@@ -845,6 +981,7 @@ void setup() {
 void loop() {
   SinricPro.handle();
   ArduinoOTA.handle();
+  serviceWiFi();
   checkWiFiWatchdog();
   checkSinricWatchdog();
   checkRadioWatchdog();
