@@ -87,9 +87,11 @@ This replaces the WiFi/SinricPro *credentials* and the remote's *DIP switch addr
 Setup, for the person flashing it:
 
 1. **Flash it**: `pio run -e c3_mini_fan_public -t upload` (no `secrets.h` needed for this target).
-2. **Connect to the setup network** — on first boot (or whenever it can't connect to a previously saved WiFi network), it opens a WiFi access point named `FanControllerSetup`. Connect to it from a phone or laptop.
+2. **Connect to the setup network** — on first boot (no WiFi network saved yet), it opens a WiFi access point named `FanControllerSetup`. Connect to it from a phone or laptop.
 3. **Fill in the portal** — a captive portal page should open automatically (or navigate to `192.168.4.1`); choose your home WiFi network and enter its password, plus your own SinricPro App Key, App Secret, Fan device ID, and Light device ID (from your own SinricPro account — see [Setup](#setup) above for creating those devices), your remote's 4 DIP switch positions (`on`/`off` each, matching the physical sliders under the battery cover), and optionally a device hostname (defaults to `myfan`, see below).
-4. Submit — the device saves those to flash, computes its RF codes from the DIP positions, connects to your WiFi, and starts talking to SinricPro. If it ever fails to connect (e.g. moved to a new network), it automatically reopens the `FanControllerSetup` portal (DIP/SinricPro fields stay saved).
+4. Submit — the device saves those to flash, computes its RF codes from the DIP positions, connects to your WiFi, and starts talking to SinricPro. Once a network is saved, the device **never opens the portal on its own**: if it can't join (router restarting, a power cut that outlasts the router), it starts anyway and retries the saved network every 30 s, rejoining as soon as the router is back. If the portal does open on a new device and nobody uses it, it closes after 5 minutes and the device restarts.
+
+To reopen the portal later (new WiFi network, or to change any field), **hold the BOOT button for 3–10 seconds and let go**: the LED blinks once at 3 s as the cue to release, and the device reboots into `FanControllerSetup` with everything still saved. Holding it past 10 s does a factory reset instead (see below).
 
 Unlike `c3_mini_fan`, this build has no ntfy.sh push notifications — reboot reasons are still logged to serial for anyone debugging, just not pushed anywhere, to keep the shared build simpler and dependency-free for other users.
 
@@ -98,7 +100,7 @@ Unlike `c3_mini_fan`, this build has no ntfy.sh push notifications — reboot re
 The device is reachable on the local network at `http://<hostname>.local` (default hostname `myfan`, changeable in the setup portal). This is used for:
 
 - **OTA flashing during development**: `pio run -e c3_mini_fan_public -t upload --upload-port myfan.local` flashes over WiFi instead of USB.
-- **Firmware updates without a cable, for anyone**: hold the **BOOT button** (GPIO9 on most ESP32-C3 boards) for 10 seconds to wipe the saved WiFi/SinricPro config and reboot into the `FanControllerSetup` portal — then, instead of (or in addition to) reconfiguring WiFi, use the portal's built-in **Update** page to upload a `.bin` firmware file directly from a browser. This is a stock WiFiManager feature, not custom code. Note the setup AP is open/unauthenticated by default, so this window is only as secure as who can join your WiFi during the brief time it's active.
+- **Firmware updates without a cable, for anyone**: hold the **BOOT button** (GPIO9 on most ESP32-C3 boards) for 3–10 seconds and release to reboot into the `FanControllerSetup` portal with everything kept (or hold it 10 seconds to wipe the saved WiFi/SinricPro config first) — then, instead of (or in addition to) reconfiguring WiFi, use the portal's built-in **Update** page to upload a `.bin` firmware file directly from a browser. This is a stock WiFiManager feature, not custom code. Note the setup AP is open/unauthenticated by default, so this window is only as secure as who can join your WiFi during the brief time it's active.
 
 ### Multiple fan units
 
@@ -126,7 +128,7 @@ The remote only has a single **light toggle** button, not separate on/off codes.
 The production firmware (`fan_control.cpp`) includes a few self-healing measures for a device meant to run unattended indefinitely:
 
 - **Bounded WiFi connect at boot** — if WiFi doesn't connect within 30s, it reboots and retries, instead of hanging forever.
-- **WiFi watchdog** — if WiFi drops and stays disconnected for 60s during normal operation, it reboots.
+- **WiFi watchdog** — if WiFi drops and stays disconnected for 60s during normal operation, it reboots. In `c3_mini_fan_public`, the radio is reset and the saved network retried every 30s while it's down, and the reboot backstop is 5 minutes; a reboot there never opens the setup portal once a network is saved.
 - **SinricPro watchdog** — WiFi staying connected doesn't guarantee SinricPro's WebSocket/TLS connection is actually up. Tracks time since the last successful SinricPro connection independently of WiFi state, and reboots if it's been unreachable for 10 minutes — added after a field log showed WiFi stay associated for over an hour while SinricPro was unreachable (DNS/TLS failures), invisible to the WiFi watchdog, recovering only because SinricPro's own internal retry logic eventually got lucky.
 - **Radio watchdog** — every 60s, re-checks that the CC1101 still answers over SPI (the same VERSION-register check done at boot). Catches the radio silently wedging mid-operation — a failure mode where WiFi/SinricPro stay connected (Google Assistant still gives its ack "beep") but the RF commands stop actually transmitting. Fixes itself with a reboot rather than needing a manual power cycle.
 - **Daily scheduled reboot** — once a day at 3am (`REBOOT_HOUR`, US Eastern via the `TZ_STRING` POSIX timezone string, DST-aware), it reboots proactively to guard against slow heap fragmentation from the long-running SinricPro WebSocket/TLS connection. Time is synced via NTP at boot.
