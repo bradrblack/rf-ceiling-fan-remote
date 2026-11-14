@@ -533,6 +533,44 @@ void computeRfCodes() {
        rfCodeFanLow, rfCodeFanMedium, rfCodeFanHigh, rfCodeFanOff, rfCodeLight);
 }
 
+// Join-failure diagnostics, so a device that won't rejoin says why on the
+// serial log instead of just "not connected". The driver's disconnect reason
+// (e.g. 15 = 4-way handshake timeout / wrong password, 201 = network not
+// found, 2/8 = auth expired / left, often weak signal) is logged at most
+// every 10 s, since the driver can fire these back to back.
+unsigned long lastDisconnectLog = 0;
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
+  if (lastDisconnectLog != 0 && millis() - lastDisconnectLog < 10000) return;
+  lastDisconnectLog = millis();
+  logf("[WiFi]: Disconnected / join failed, reason %u", info.wifi_sta_disconnected.reason);
+}
+
+// Scans once and logs whether the saved network is visible and how strong:
+// tells apart "router down / not broadcasting on 2.4 GHz" from "seen but
+// weak" from "seen and strong, so it's the password/security mode".
+void logSavedNetworkScan() {
+  wifi_config_t conf;
+  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK || conf.sta.ssid[0] == 0) {
+    logf("[WiFi]: No saved network to look for");
+    return;
+  }
+  char ssid[33];
+  memcpy(ssid, conf.sta.ssid, 32);
+  ssid[32] = '\0';
+  int n = WiFi.scanNetworks();
+  bool seen = false;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) == ssid) {
+      seen = true;
+      logf("[WiFi]: Saved network \"%s\" seen: RSSI %d dBm, channel %d, auth mode %d",
+           ssid, WiFi.RSSI(i), WiFi.channel(i), (int)WiFi.encryptionType(i));
+    }
+  }
+  if (!seen) logf("[WiFi]: Saved network \"%s\" not seen (%d other networks found)", ssid, n < 0 ? 0 : n);
+  WiFi.scanDelete();
+}
+
 void setupWiFiManager(bool forcePortal) {
   loadSinricConfig();
 
@@ -592,6 +630,7 @@ void setupWiFiManager(bool forcePortal) {
   // Must happen before autoConnect(), since that's what actually associates
   // and does the DHCP handshake (which is when the hostname gets sent).
   WiFi.setHostname(hostname);
+  WiFi.onEvent(onWiFiEvent);
 
   // Read after the driver is up (above) -- it checks the driver's stored
   // STA config. A device that already has a network saved never opens the
@@ -623,6 +662,7 @@ void setupWiFiManager(bool forcePortal) {
   } else {
     // Carry on without WiFi: serviceWiFi() retries every WIFI_RETRY_MS, and
     // SinricPro connects on its own once the network is back.
+    logSavedNetworkScan();
     lastWifiAttempt = millis();
     logf("[WiFi]: Can't join the saved network yet; retrying every %lus "
          "(hold BOOT %lus and release for the setup portal)",
